@@ -1,0 +1,6 @@
+{
+  "name": "TO KNOW NOTHING - Heavy Apparel Archive",
+  "description": "UK-based heavy cotton apparel archive and streetwear zine storefront featuring 300-500GSM garments, compact polaroid grids, London studio workshop, and Royal Mail dispatch.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
