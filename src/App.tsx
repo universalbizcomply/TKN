@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { CategoryId, ProductSortOption, ProductItem, CartItem, DropBannerConfig } from './types';
+import { CategoryId, ProductSortOption, ProductItem, CartItem, DropBannerConfig, CustomerProfile, InternalStaffUser } from './types';
 import { INITIAL_PRODUCTS } from './data/catalogData';
 import { api } from './lib/api';
 import { NavigationSidebar } from './components/NavigationSidebar';
@@ -21,6 +21,10 @@ import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { WishlistModal } from './components/WishlistModal';
 import { SizeGuideModal } from './components/SizeGuideModal';
 import { NotifyMeModal } from './components/NotifyMeModal';
+import { CustomerConciergeModal } from './components/CustomerConciergeModal';
+import { CustomerAccountModal } from './components/CustomerAccountModal';
+import { StudioAuthModal } from './components/StudioAuthModal';
+import { ArchiveSocialFeed } from './components/ArchiveSocialFeed';
 import { applyMetaTagsToDocument } from './utils/seo';
 import { useArchiveShortcuts } from './hooks/useArchiveShortcuts';
 import { loadWishlistIds, saveWishlistIds } from './utils/wishlistStorage';
@@ -43,8 +47,31 @@ export default function App() {
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [wishlistIds, setWishlistIds] = useState<string[]>(() => loadWishlistIds());
   const [isWishlistOpen, setIsWishlistOpen] = useState(false);
+  const [isConciergeOpen, setIsConciergeOpen] = useState(false);
   const [isGlobalSizeGuideOpen, setIsGlobalSizeGuideOpen] = useState(false);
   const [cartBumpTrigger, setCartBumpTrigger] = useState<number>(0);
+
+  // Customer Account & Profile state (Customer Profile, VIP Tier, Saved Orders)
+  const [currentCustomer, setCurrentCustomer] = useState<CustomerProfile | null>(() => {
+    try {
+      const saved = localStorage.getItem('tkn_current_customer');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [isCustomerAccountOpen, setIsCustomerAccountOpen] = useState(false);
+
+  // Internal Studio Staff state (Staff / Manager / Admin RBAC)
+  const [currentStaffUser, setCurrentStaffUser] = useState<InternalStaffUser | null>(() => {
+    try {
+      const saved = localStorage.getItem('tkn_staff_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [isStaffAuthOpen, setIsStaffAuthOpen] = useState(false);
 
   // Waitlist (Notify Me) modal state
   const [notifyProduct, setNotifyProduct] = useState<ProductItem | null>(null);
@@ -64,6 +91,24 @@ export default function App() {
   useEffect(() => {
     saveWishlistIds(wishlistIds);
   }, [wishlistIds]);
+
+  // Persist current logged in customer
+  useEffect(() => {
+    if (currentCustomer) {
+      localStorage.setItem('tkn_current_customer', JSON.stringify(currentCustomer));
+    } else {
+      localStorage.removeItem('tkn_current_customer');
+    }
+  }, [currentCustomer]);
+
+  // Persist current logged in staff user
+  useEffect(() => {
+    if (currentStaffUser) {
+      localStorage.setItem('tkn_staff_user', JSON.stringify(currentStaffUser));
+    } else {
+      localStorage.removeItem('tkn_staff_user');
+    }
+  }, [currentStaffUser]);
 
   // Global Keyboard Shortcuts Hook
   useArchiveShortcuts({
@@ -94,6 +139,17 @@ export default function App() {
       if (infoModal) setInfoModal(null);
       if (isShortcutsOpen) setIsShortcutsOpen(false);
       if (isWishlistOpen) setIsWishlistOpen(false);
+      if (isConciergeOpen) setIsConciergeOpen(false);
+    },
+    onToggleConcierge: () => {
+      setIsConciergeOpen((prev) => !prev);
+      if (isCartOpen) setIsCartOpen(false);
+      if (isAdminOpen) setIsAdminOpen(false);
+      if (isTrackerOpen) setIsTrackerOpen(false);
+      if (infoModal) setInfoModal(null);
+      if (isShortcutsOpen) setIsShortcutsOpen(false);
+      if (isWishlistOpen) setIsWishlistOpen(false);
+      if (isGlobalSizeGuideOpen) setIsGlobalSizeGuideOpen(false);
     },
     onFocusSearch: () => {
       // Close active modals so user can see search input
@@ -105,6 +161,7 @@ export default function App() {
       if (isShortcutsOpen) setIsShortcutsOpen(false);
       if (isWishlistOpen) setIsWishlistOpen(false);
       if (isGlobalSizeGuideOpen) setIsGlobalSizeGuideOpen(false);
+      if (isConciergeOpen) setIsConciergeOpen(false);
 
       setTimeout(() => {
         searchInputRef.current?.focus();
@@ -112,7 +169,13 @@ export default function App() {
       }, 30);
     },
     onCloseModals: () => {
-      if (isGlobalSizeGuideOpen) {
+      if (isCustomerAccountOpen) {
+        setIsCustomerAccountOpen(false);
+      } else if (isStaffAuthOpen) {
+        setIsStaffAuthOpen(false);
+      } else if (isConciergeOpen) {
+        setIsConciergeOpen(false);
+      } else if (isGlobalSizeGuideOpen) {
         setIsGlobalSizeGuideOpen(false);
       } else if (isShortcutsOpen) {
         setIsShortcutsOpen(false);
@@ -169,7 +232,7 @@ export default function App() {
       }
     },
     isAnyModalOpen: Boolean(
-      studioProduct || isCartOpen || isAdminOpen || isTrackerOpen || infoModal || isShortcutsOpen || isWishlistOpen
+      studioProduct || isCartOpen || isAdminOpen || isTrackerOpen || infoModal || isShortcutsOpen || isWishlistOpen || isConciergeOpen || isCustomerAccountOpen || isStaffAuthOpen
     ),
   });
 
@@ -301,6 +364,8 @@ export default function App() {
         return 'WORKWEAR DUCK CANVAS PANTS';
       case 'lookbook':
         return 'STREET LOOKBOOK EDITORIAL';
+      case 'social':
+        return 'ARCHIVE SOCIAL BROADCAST (IG & TIKTOK)';
       default:
         return 'COMPLETE ARCHIVE CATALOG';
     }
@@ -403,6 +468,7 @@ export default function App() {
       if (e.key === 'Escape') {
         if (isShortcutsOpen) setIsShortcutsOpen(false);
         if (isWishlistOpen) setIsWishlistOpen(false);
+        if (isConciergeOpen) setIsConciergeOpen(false);
         if (isCartOpen) setIsCartOpen(false);
         if (isAdminOpen) setIsAdminOpen(false);
         if (isTrackerOpen) setIsTrackerOpen(false);
@@ -412,7 +478,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleGlobalKey);
     return () => window.removeEventListener('keydown', handleGlobalKey);
-  }, [isShortcutsOpen, isWishlistOpen, isCartOpen, isAdminOpen, isTrackerOpen, infoModal, studioProduct]);
+  }, [isShortcutsOpen, isWishlistOpen, isConciergeOpen, isCartOpen, isAdminOpen, isTrackerOpen, infoModal, studioProduct]);
 
   return (
     <div className="min-h-screen bg-[#fbf9f3] text-black font-sans selection:bg-yellow-300 selection:text-black">
@@ -440,6 +506,11 @@ export default function App() {
         onOpenSketchInfo={() => setInfoModal('sketch')}
         onOpenAdmin={() => setIsAdminOpen(true)}
         onOpenTracker={() => setIsTrackerOpen(true)}
+        onOpenConcierge={() => setIsConciergeOpen(true)}
+        onOpenCustomerAccount={() => setIsCustomerAccountOpen(true)}
+        currentCustomer={currentCustomer}
+        onOpenStaffAuth={() => setIsStaffAuthOpen(true)}
+        currentStaffUser={currentStaffUser}
       />
 
       {/* 2. Top Pinned Header Bar (fixed top-0 left-36 sm:left-44 right-0 h-12 z-30) */}
@@ -471,8 +542,13 @@ export default function App() {
         }}
         wishlistCount={wishlistIds.length}
         onOpenWishlist={() => setIsWishlistOpen(true)}
+        onOpenConcierge={() => setIsConciergeOpen(true)}
         onOpenShortcuts={() => setIsShortcutsOpen(true)}
         onScrollDown={handleScrollDown}
+        currentCustomer={currentCustomer}
+        onOpenCustomerAccount={() => setIsCustomerAccountOpen(true)}
+        currentStaffUser={currentStaffUser}
+        onOpenStaffAuth={() => setIsStaffAuthOpen(true)}
       />
 
       {/* 3. Main Scrollable Content Canvas (offset for pinned chrome) */}
@@ -548,65 +624,104 @@ export default function App() {
             </div>
           </div>
 
-          {/* 4. Compact Polaroid Product Grid */}
-          <div className="pt-5 pb-8">
-            {filteredProducts.length === 0 ? (
-              <div className="text-center py-12 px-4 bg-white border-2 border-black max-w-md mx-auto my-6 shadow-[3px_3px_0px_#000000] font-mono-tag">
-                <p className="font-headline font-black text-sm uppercase text-black">
-                  NO GARMENTS FOUND MATCHING "{searchQuery}"
-                </p>
-                <p className="text-xs text-neutral-600 mt-1">
-                  Try searching for "500GSM", "hoodie", "tee", "thermal", or "pant".
-                </p>
+          {activeCategory === 'social' ? (
+            <div className="pt-3">
+              <div className="mb-3 flex items-center justify-between">
                 <button
-                  onClick={() => setSearchQuery('')}
-                  className="mt-3 bg-black text-yellow-300 font-bold px-3 py-1 text-xs border border-black uppercase cursor-pointer hover:bg-neutral-800"
+                  onClick={() => setActiveCategory('all')}
+                  className="bg-black text-yellow-300 hover:bg-neutral-800 border-2 border-black px-3 py-1 font-mono-tag font-bold text-xs uppercase shadow-[2px_2px_0px_#000000] active:translate-y-0.5 cursor-pointer flex items-center gap-1.5"
                 >
-                  CLEAR SEARCH [ESC]
+                  <span>←</span>
+                  <span>RETURN TO CLOTHING CATALOG</span>
                 </button>
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5 sm:gap-3.5 items-start">
-                {filteredProducts.map((product, index) => (
-                  <PolaroidCard
-                    key={product.id}
-                    product={product}
-                    index={index}
-                    isStashed={wishlistIds.includes(product.id)}
-                    onToggleStash={handleToggleWishlist}
-                    onOpenStudio={(prod, slide) => {
-                      setStudioProduct(prod);
-                      setStudioInitialSlide(slide ?? 0);
-                    }}
-                    onQuickAdd={(prod) => handleAddToCart(prod)}
-                    onNotifyMe={(prod) => {
-                      setNotifyProduct(prod);
-                      setNotifyInitialSize(undefined);
-                    }}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
 
-          {/* Additional Notebook Archive Notes & Technical Drawing stamp */}
-          <div className="my-6 p-4 bg-white/80 border-2 border-dashed border-black/70 max-w-xl mx-auto text-center transform rotate-0.5 shadow-xs">
-            <div className="inline-block bg-black text-yellow-300 text-[9px] font-mono-tag font-bold px-2 py-0.5 mb-1.5 uppercase">
-              TO KNOW NOTHING ARCHIVE // FULL-STACK E-COMMERCE SUITE
+                <div className="bg-[#feef89] border border-black px-2 py-0.5 text-[10px] font-mono-tag font-bold text-black uppercase shadow-xs">
+                  AGGREGATING @toknownothing & COMMUNITY
+                </div>
+              </div>
+
+              <ArchiveSocialFeed
+                products={products}
+                onOpenStudio={(prod) => {
+                  setStudioProduct(prod);
+                  setStudioInitialSlide(0);
+                }}
+                onToast={showToast}
+              />
             </div>
-            <p className="font-typewriter text-xs text-neutral-800 italic leading-relaxed">
-              "Heavyweight fabrics pre-shrunk in artisan dye houses. Managed end-to-end via Express REST backend on port 3000: live stock tracking, warehouse dispatching, automated discount codes, and customer waybill lookups."
-            </p>
-            <div className="mt-2.5 flex justify-center gap-3 text-[10px] font-mono-tag font-bold text-neutral-600">
-              <button onClick={() => setIsTrackerOpen(true)} className="hover:text-black underline">
-                [TRACK AN EXISTING ORDER]
-              </button>
-              <span>•</span>
-              <button onClick={() => setIsAdminOpen(true)} className="hover:text-black underline">
-                [OPEN MANAGEMENT CONSOLE]
-              </button>
-            </div>
-          </div>
+          ) : (
+            <>
+              {/* 4. Compact Polaroid Product Grid */}
+              <div className="pt-5 pb-8">
+                {filteredProducts.length === 0 ? (
+                  <div className="text-center py-12 px-4 bg-white border-2 border-black max-w-md mx-auto my-6 shadow-[3px_3px_0px_#000000] font-mono-tag">
+                    <p className="font-headline font-black text-sm uppercase text-black">
+                      NO GARMENTS FOUND MATCHING "{searchQuery}"
+                    </p>
+                    <p className="text-xs text-neutral-600 mt-1">
+                      Try searching for "500GSM", "hoodie", "tee", "thermal", or "pant".
+                    </p>
+                    <button
+                      onClick={() => setSearchQuery('')}
+                      className="mt-3 bg-black text-yellow-300 font-bold px-3 py-1 text-xs border border-black uppercase cursor-pointer hover:bg-neutral-800"
+                    >
+                      CLEAR SEARCH [ESC]
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5 sm:gap-3.5 items-start">
+                    {filteredProducts.map((product, index) => (
+                      <PolaroidCard
+                        key={product.id}
+                        product={product}
+                        index={index}
+                        isStashed={wishlistIds.includes(product.id)}
+                        onToggleStash={handleToggleWishlist}
+                        onOpenStudio={(prod, slide) => {
+                          setStudioProduct(prod);
+                          setStudioInitialSlide(slide ?? 0);
+                        }}
+                        onQuickAdd={(prod) => handleAddToCart(prod)}
+                        onNotifyMe={(prod) => {
+                          setNotifyProduct(prod);
+                          setNotifyInitialSize(undefined);
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Additional Notebook Archive Notes & Technical Drawing stamp */}
+              <div className="my-6 p-4 bg-white/80 border-2 border-dashed border-black/70 max-w-xl mx-auto text-center transform rotate-0.5 shadow-xs">
+                <div className="inline-block bg-black text-yellow-300 text-[9px] font-mono-tag font-bold px-2 py-0.5 mb-1.5 uppercase">
+                  TO KNOW NOTHING ARCHIVE // FULL-STACK E-COMMERCE SUITE
+                </div>
+                <p className="font-typewriter text-xs text-neutral-800 italic leading-relaxed">
+                  "Heavyweight fabrics pre-shrunk in artisan dye houses. Managed end-to-end via Express REST backend on port 3000: live stock tracking, warehouse dispatching, automated discount codes, and customer waybill lookups."
+                </p>
+                <div className="mt-2.5 flex justify-center gap-3 text-[10px] font-mono-tag font-bold text-neutral-600">
+                  <button onClick={() => setIsTrackerOpen(true)} className="hover:text-black underline">
+                    [TRACK AN EXISTING ORDER]
+                  </button>
+                  <span>•</span>
+                  <button onClick={() => setIsAdminOpen(true)} className="hover:text-black underline">
+                    [OPEN MANAGEMENT CONSOLE]
+                  </button>
+                </div>
+              </div>
+
+              {/* 5. Archive Social Feed (Community Fit Pics & BTS) */}
+              <ArchiveSocialFeed
+                products={products}
+                onOpenStudio={(prod) => {
+                  setStudioProduct(prod);
+                  setStudioInitialSlide(0);
+                }}
+                onToast={showToast}
+              />
+            </>
+          )}
 
         </div>
       </main>
@@ -666,7 +781,7 @@ export default function App() {
         onSuccess={(msg) => showToast(msg)}
       />
 
-      {/* Shopping Bag / Order Slip & Multi-Step Checkout Modal */}
+      {/* Shopping Bag / Order Slip & Multi-Step Checkout Modal (Guest + Member flow) */}
       <OrderBagModal
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
@@ -678,6 +793,9 @@ export default function App() {
           setTrackingOrderId(orderId);
           setIsTrackerOpen(true);
         }}
+        currentCustomer={currentCustomer}
+        onOpenCustomerAccount={() => setIsCustomerAccountOpen(true)}
+        onCustomerLogin={(customer) => setCurrentCustomer(customer)}
       />
 
       {/* Pinned Wishlist / Stash Modal */}
@@ -704,13 +822,60 @@ export default function App() {
         initialOrderId={trackingOrderId}
       />
 
-      {/* Comprehensive E-Commerce Admin Console */}
+      {/* Comprehensive E-Commerce Admin Console with Role-Based Access Control */}
       <AdminConsole
         isOpen={isAdminOpen}
         onClose={() => setIsAdminOpen(false)}
         onRefreshStoreProducts={refreshProducts}
         products={products}
         onMetaUpdated={(updatedMeta) => applyMetaTagsToDocument(updatedMeta)}
+        currentStaffUser={currentStaffUser}
+        onStaffLogout={() => {
+          setCurrentStaffUser(null);
+          showToast('LOGGED OUT OF STUDIO CONSOLE');
+        }}
+        onOpenStaffAuth={() => setIsStaffAuthOpen(true)}
+        onSwitchStaffUser={(user) => {
+          setCurrentStaffUser(user);
+          showToast(`OPERATOR ACTIVE: ${user.name.toUpperCase()} (${user.role.toUpperCase()})`);
+        }}
+      />
+
+      {/* Customer Account & Saved Profile Modal */}
+      <CustomerAccountModal
+        isOpen={isCustomerAccountOpen}
+        onClose={() => setIsCustomerAccountOpen(false)}
+        currentCustomer={currentCustomer}
+        onCustomerLogin={(cust) => {
+          setCurrentCustomer(cust);
+          showToast(`WELCOME BACK, ${cust.name.split(' ')[0].toUpperCase()} (${cust.tier === 'VIP_ARCHIVE_PATRON' ? 'VIP' : 'MEMBER'})`);
+        }}
+        onCustomerLogout={() => {
+          setCurrentCustomer(null);
+          showToast('LOGGED OUT OF MEMBER ACCOUNT');
+        }}
+        onOpenTracker={(orderId) => {
+          setIsCustomerAccountOpen(false);
+          if (orderId) setTrackingOrderId(orderId);
+          setIsTrackerOpen(true);
+        }}
+      />
+
+      {/* Studio Staff / Manager / Admin Authentication Modal */}
+      <StudioAuthModal
+        isOpen={isStaffAuthOpen}
+        onClose={() => setIsStaffAuthOpen(false)}
+        currentUser={currentStaffUser}
+        onLoginSuccess={(user) => {
+          setCurrentStaffUser(user);
+          setIsStaffAuthOpen(false);
+          setIsAdminOpen(true);
+          showToast(`ACCESS GRANTED: ${user.name.toUpperCase()} (${user.role.toUpperCase()})`);
+        }}
+        onLogout={() => {
+          setCurrentStaffUser(null);
+          showToast('STAFF LOGOUT COMPLETE');
+        }}
       />
 
       {/* Zine Info / Manifesto / Contact / Drop Modals */}
@@ -730,6 +895,23 @@ export default function App() {
         isOpen={isGlobalSizeGuideOpen}
         onClose={() => setIsGlobalSizeGuideOpen(false)}
         product={studioProduct}
+      />
+
+      {/* Floating Interactive Customer Concierge & Archive Bot (TKN) */}
+      <CustomerConciergeModal
+        isOpen={isConciergeOpen}
+        onOpen={() => setIsConciergeOpen(true)}
+        onClose={() => setIsConciergeOpen(false)}
+        products={products}
+        onAddToCart={(prod, sz) => handleAddToCart(prod, sz)}
+        onOpenProduct={(prod) => {
+          setStudioProduct(prod);
+          setStudioInitialSlide(0);
+        }}
+        onOpenTracker={(orderId) => {
+          setTrackingOrderId(orderId);
+          setIsTrackerOpen(true);
+        }}
       />
 
     </div>

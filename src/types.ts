@@ -1,4 +1,4 @@
-export type CategoryId = 'all' | 'best-seller' | 'whats-new' | 'hoodies' | 'shirts' | 'sweatshirts' | 'pants' | 'lookbook';
+export type CategoryId = 'all' | 'best-seller' | 'whats-new' | 'hoodies' | 'shirts' | 'sweatshirts' | 'pants' | 'lookbook' | 'social';
 
 export type ProductSortOption = 'featured' | 'newest' | 'price-asc' | 'price-desc';
 
@@ -100,6 +100,31 @@ export interface DropBannerConfig {
   active: boolean;
 }
 
+export interface SearchAnalyticsTerm {
+  term: string;
+  count: number;
+  resultCount: number;
+  hasResults: boolean;
+  lastSearchedAt: string;
+  category?: string;
+  recommendation?: string;
+}
+
+export interface SearchAnalyticsSummary {
+  totalSearches: number;
+  uniqueTermsCount: number;
+  zeroResultCount: number;
+  zeroResultRate: number;
+  topSearchTerms: SearchAnalyticsTerm[];
+  unmetDemandTerms: SearchAnalyticsTerm[];
+  recentQueries: Array<{
+    id: string;
+    term: string;
+    resultCount: number;
+    timestamp: string;
+  }>;
+}
+
 export interface AnalyticsData {
   grossRevenue: number;
   totalOrders: number;
@@ -109,6 +134,7 @@ export interface AnalyticsData {
   totalInventoryValue: number;
   ordersByStatus: Record<OrderStatus, number>;
   topProducts: { id: string; title: string; unitsSold: number; revenue: number }[];
+  searchAnalytics?: SearchAnalyticsSummary;
 }
 
 export type ViewMode = 'store' | 'admin' | 'tracking';
@@ -161,4 +187,93 @@ export interface ProductReview {
   date: string;
   verified: boolean;
   likes: number;
+}
+
+export type SocialPlatform = 'instagram' | 'tiktok';
+export type SocialFeedCategory = 'all' | 'fit-pic' | 'bts' | 'community';
+
+export interface SocialFeedPost {
+  id: string;
+  platform: SocialPlatform;
+  authorHandle: string;
+  authorName: string;
+  authorAvatar?: string;
+  category: 'fit-pic' | 'bts' | 'community';
+  caption: string;
+  timestamp: string;
+  likes: number;
+  hasLiked?: boolean;
+  commentsCount: number;
+  sharesCount?: number;
+  taggedGarment?: {
+    productId?: string;
+    productTitle: string;
+    gsm?: string;
+    price?: number;
+  };
+  mediaUrl: string;
+  mediaType: 'image' | 'video';
+  videoDuration?: string;
+  location?: string;
+  aspectRatio?: 'square' | 'portrait';
+  isVerified?: boolean;
+  tags: string[];
+}
+
+export type LinkedAccountProvider = 'google' | 'apple' | 'shoppay' | 'instagram' | 'discord' | 'github';
+
+export interface LinkedAccountItem {
+  provider: LinkedAccountProvider;
+  accountId: string;
+  emailOrHandle: string;
+  displayName?: string;
+  avatarUrl?: string;
+  linkedAt: string;
+}
+
+export interface LinkedAccounts {
+  google?: LinkedAccountItem;
+  apple?: LinkedAccountItem;
+  shoppay?: LinkedAccountItem;
+  instagram?: LinkedAccountItem;
+  discord?: LinkedAccountItem;
+  github?: LinkedAccountItem;
+}
+
+export interface CustomerProfile {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  address: {
+    street: string;
+    city: string;
+    state: string;
+    zip: string;
+    country: string;
+  };
+  measurements?: {
+    heightCm?: number;
+    weightKg?: number;
+    preferredFit?: 'snug' | 'true-to-size' | 'oversized-boxy' | 'extreme-drop';
+    preferredChestInches?: number;
+  };
+  linkedAccounts?: LinkedAccounts;
+  tier: 'ARCHIVE_INITIATE' | 'CORE_PATRON' | 'VIP_ARCHIVE_PATRON';
+  ordersCount: number;
+  totalSpent: number;
+  savedPaymentLast4?: string;
+  createdAt: string;
+}
+
+export type InternalRole = 'staff' | 'manager' | 'admin';
+
+export interface InternalStaffUser {
+  id: string;
+  name: string;
+  email: string;
+  role: InternalRole;
+  department: string;
+  lastLogin: string;
+  permissions: string[];
 }

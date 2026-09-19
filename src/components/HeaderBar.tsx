@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Search, X, Keyboard, ArrowUpDown, Tag, ChevronRight, CornerDownLeft, Sparkles } from 'lucide-react';
-import { ProductSortOption, ProductItem, CategoryId } from '../types';
+import { ProductSortOption, ProductItem, CategoryId, CustomerProfile, InternalStaffUser } from '../types';
+import { api } from '../lib/api';
 
 interface HeaderBarProps {
   activeCategoryLabel?: string;
@@ -15,7 +16,12 @@ interface HeaderBarProps {
   onOpenShortcuts?: () => void;
   wishlistCount?: number;
   onOpenWishlist?: () => void;
+  onOpenConcierge?: () => void;
   onScrollDown: () => void;
+  currentCustomer?: CustomerProfile | null;
+  onOpenCustomerAccount?: () => void;
+  currentStaffUser?: InternalStaffUser | null;
+  onOpenStaffAuth?: () => void;
 }
 
 interface CategorySuggestion {
@@ -32,10 +38,11 @@ const CATEGORY_SUGGESTIONS: CategorySuggestion[] = [
   { id: 'shirts', label: 'BOX TEES & THERMALS', tag: '300GSM', keywords: ['tee', 'tees', 't-shirt', 'shirt', 'shirts', 'box', 'waffle', 'thermal', '300gsm', 'acid', 'cotton'] },
   { id: 'sweatshirts', label: 'RAW EDGE SWEATSHIRTS', tag: '450GSM', keywords: ['sweatshirt', 'sweatshirts', 'crew', 'crewneck', 'raw', 'edge', '450gsm', 'heavy'] },
   { id: 'pants', label: 'WORKWEAR CANVAS PANTS', tag: 'DUCK', keywords: ['pant', 'pants', 'canvas', 'duck', 'trousers', 'skate', 'workwear', 'bottoms'] },
+  { id: 'social', label: 'ARCHIVE SOCIAL FEED (IG & TIKTOK)', tag: 'LIVE', keywords: ['social', 'feed', 'instagram', 'tiktok', 'fit', 'pic', 'bts', 'community', 'video'] },
   { id: 'all', label: 'FULL ARCHIVE CATALOG', tag: 'ALL', keywords: ['all', 'full', 'catalog', 'everything', 'archive'] },
 ];
 
-const POPULAR_SEARCH_TAGS = ['500GSM', 'Acid Box Tee', 'Heavy Hoodie', 'Duck Canvas', 'Raw Edge', 'Waffle Thermal'];
+const POPULAR_SEARCH_TAGS = ['500GSM', 'Acid Box Tee', 'Heavy Hoodie', 'Social Feed', 'Duck Canvas', 'Raw Edge'];
 
 export const HeaderBar: React.FC<HeaderBarProps> = ({
   searchQuery = '',
@@ -49,7 +56,12 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   onOpenShortcuts,
   wishlistCount = 0,
   onOpenWishlist,
+  onOpenConcierge,
   onScrollDown,
+  currentCustomer = null,
+  onOpenCustomerAccount,
+  currentStaffUser = null,
+  onOpenStaffAuth,
 }) => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
@@ -125,13 +137,43 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
     };
   }, []);
 
+  const lastTrackedQueryRef = useRef<string>('');
+
+  const sendSearchTracking = (queryToTrack: string, count: number) => {
+    const clean = queryToTrack.trim().toLowerCase();
+    if (!clean || clean.length < 2) return;
+    if (lastTrackedQueryRef.current === clean) return;
+    lastTrackedQueryRef.current = clean;
+    api.trackSearch(clean, count);
+  };
+
+  // Debounced search tracking as customer types in search bar
+  useEffect(() => {
+    if (!queryTrimmed || queryTrimmed.length < 2) return;
+
+    const timer = setTimeout(() => {
+      const matchCount = matchingProducts.length + matchingCategories.length;
+      sendSearchTracking(queryTrimmed, matchCount);
+    }, 700);
+
+    return () => clearTimeout(timer);
+  }, [queryTrimmed, matchingProducts.length, matchingCategories.length]);
+
   const handleSelectProduct = (product: ProductItem) => {
+    const matchCount = matchingProducts.length + matchingCategories.length;
+    if (queryTrimmed) {
+      sendSearchTracking(queryTrimmed, matchCount);
+    }
     setIsDropdownOpen(false);
     setActiveHighlightIndex(-1);
     onSelectProduct?.(product);
   };
 
   const handleSelectCategory = (catId: CategoryId) => {
+    const matchCount = matchingProducts.length + matchingCategories.length;
+    if (queryTrimmed) {
+      sendSearchTracking(queryTrimmed, matchCount);
+    }
     setIsDropdownOpen(false);
     setActiveHighlightIndex(-1);
     onSelectCategory?.(catId);
@@ -141,6 +183,17 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
     onSearchChange?.(tag);
     setIsDropdownOpen(true);
     searchInputRef?.current?.focus();
+    // Fire tracking for the applied tag
+    setTimeout(() => {
+      const cleanTag = tag.trim().toLowerCase();
+      const directMatches = products.filter(
+        (p) =>
+          p.title.toLowerCase().includes(cleanTag) ||
+          (p.gsm && p.gsm.toLowerCase().includes(cleanTag)) ||
+          p.category.toLowerCase().includes(cleanTag)
+      ).length;
+      sendSearchTracking(cleanTag, directMatches);
+    }, 100);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -149,6 +202,10 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
         setIsDropdownOpen(true);
         setActiveHighlightIndex(0);
         e.preventDefault();
+      } else if (e.key === 'Enter' && queryTrimmed) {
+        // Track the entered query immediately
+        const matchCount = matchingProducts.length + matchingCategories.length;
+        sendSearchTracking(queryTrimmed, matchCount);
       }
       return;
     }
@@ -163,6 +220,8 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
       );
     } else if (e.key === 'Enter') {
       e.preventDefault();
+      const matchCount = matchingProducts.length + matchingCategories.length;
+      sendSearchTracking(queryTrimmed, matchCount);
       if (activeHighlightIndex >= 0 && activeHighlightIndex < selectableItems.length) {
         const item = selectableItems[activeHighlightIndex];
         if (item.type === 'category') {
@@ -444,8 +503,23 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
         </div>
       </div>
 
-      {/* Right: Wishlist Stash, Keyboard shortcut toggle, Ticker & Scroll trigger */}
+      {/* Right: TKN Bot, Wishlist Stash, Keyboard shortcut toggle, Ticker & Scroll trigger */}
       <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+        {onOpenConcierge && (
+          <button
+            id="headerTknBotButton"
+            onClick={onOpenConcierge}
+            className="inline-flex items-center gap-1.5 bg-black hover:bg-neutral-800 text-yellow-300 border border-black px-2 py-0.5 text-[9px] sm:text-[10px] font-mono-tag font-black cursor-pointer shadow-xs active:scale-95 transition-all"
+            title="Chat with TKN - AI Storefront Concierge [C]"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span>✦ TKN BOT</span>
+            <kbd className="hidden xl:inline bg-neutral-800 text-yellow-200 border border-neutral-700 text-[8px] px-1 font-mono">
+              C
+            </kbd>
+          </button>
+        )}
+
         {onOpenWishlist && (
           <button
             id="headerWishlistButton"
@@ -465,6 +539,47 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             <kbd className="hidden lg:inline bg-neutral-100 text-neutral-500 border border-neutral-300 text-[8px] px-1 font-mono">
               W
             </kbd>
+          </button>
+        )}
+
+        {/* Customer Account / Guest Profile */}
+        {onOpenCustomerAccount && (
+          <button
+            id="headerCustomerAccountButton"
+            onClick={onOpenCustomerAccount}
+            className={`inline-flex items-center gap-1 border border-black px-1.5 sm:px-2 py-0.5 text-[9px] sm:text-[10px] font-mono-tag font-bold cursor-pointer shadow-xs active:scale-95 transition-all ${
+              currentCustomer
+                ? 'bg-yellow-300 text-black font-black'
+                : 'bg-white hover:bg-neutral-100 text-neutral-900'
+            }`}
+            title="Customer Profile & Order History"
+          >
+            <span>👤</span>
+            <span className="hidden sm:inline">
+              {currentCustomer ? currentCustomer.name.split(' ')[0].toUpperCase() : 'ACCOUNT'}
+            </span>
+            {currentCustomer && (
+              <span className="text-[8px] bg-black text-yellow-300 px-1 font-mono">
+                {currentCustomer.tier === 'VIP_ARCHIVE_PATRON' ? 'VIP' : 'MEMBER'}
+              </span>
+            )}
+          </button>
+        )}
+
+        {/* Staff / Studio Login */}
+        {onOpenStaffAuth && (
+          <button
+            id="headerStaffAuthButton"
+            onClick={onOpenStaffAuth}
+            className={`hidden md:inline-flex items-center gap-1 border border-black px-1.5 sm:px-2 py-0.5 text-[9px] sm:text-[10px] font-mono-tag font-bold cursor-pointer shadow-xs active:scale-95 transition-all ${
+              currentStaffUser
+                ? 'bg-[#1b1c18] text-yellow-300 font-black'
+                : 'bg-[#faf8f3] hover:bg-neutral-200 text-neutral-800'
+            }`}
+            title="Studio Internal Access (Staff / Manager / Admin)"
+          >
+            <span>{currentStaffUser ? '★' : '🔒'}</span>
+            <span>{currentStaffUser ? currentStaffUser.role.toUpperCase() : 'STAFF'}</span>
           </button>
         )}
 

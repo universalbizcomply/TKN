@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Order, OrderStatus, PromoCode, DropBannerConfig, AnalyticsData, ProductItem, MetaTagConfig, WaitlistEntry } from '../types';
+import { Order, OrderStatus, PromoCode, DropBannerConfig, AnalyticsData, ProductItem, MetaTagConfig, WaitlistEntry, SearchAnalyticsSummary, InternalStaffUser } from '../types';
 import { api } from '../lib/api';
 import { MetaTagManager } from './MetaTagManager';
+import { GeminiChatbotTab } from './admin/GeminiChatbotTab';
+import { GeminiImageStudioTab } from './admin/GeminiImageStudioTab';
+import { VeoVideoStudioTab } from './admin/VeoVideoStudioTab';
+import { SearchAnalyticsTracker } from './admin/SearchAnalyticsTracker';
 
 interface AdminConsoleProps {
   isOpen: boolean;
@@ -9,6 +13,10 @@ interface AdminConsoleProps {
   onRefreshStoreProducts: () => void;
   products?: ProductItem[];
   onMetaUpdated?: (config: MetaTagConfig) => void;
+  currentStaffUser?: InternalStaffUser | null;
+  onStaffLogout?: () => void;
+  onOpenStaffAuth?: () => void;
+  onSwitchStaffUser?: (user: InternalStaffUser) => void;
 }
 
 export const AdminConsole: React.FC<AdminConsoleProps> = ({
@@ -17,9 +25,15 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
   onRefreshStoreProducts,
   products = [],
   onMetaUpdated,
+  currentStaffUser = null,
+  onStaffLogout,
+  onOpenStaffAuth,
+  onSwitchStaffUser,
 }) => {
-  const [activeTab, setActiveTab] = useState<'orders' | 'inventory' | 'products' | 'marketing' | 'analytics' | 'reviews' | 'meta' | 'waitlist'>('orders');
+  const [activeTab, setActiveTab] = useState<'orders' | 'inventory' | 'products' | 'marketing' | 'analytics' | 'reviews' | 'meta' | 'waitlist' | 'team' | 'gemini_chat' | 'gemini_image' | 'veo_video'>('orders');
   const [toast, setToast] = useState<string | null>(null);
+  const [staffList, setStaffList] = useState<InternalStaffUser[]>([]);
+
 
   // Data states
   const [orders, setOrders] = useState<Order[]>([]);
@@ -35,6 +49,8 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
   const [subscribers, setSubscribers] = useState<any[]>([]);
 
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
+  const [searchAnalytics, setSearchAnalytics] = useState<SearchAnalyticsSummary | null>(null);
+  const [analyticsSubTab, setAnalyticsSubTab] = useState<'overview' | 'search'>('overview');
 
   // Reviews State
   const [reviews, setReviews] = useState<any[]>([]);
@@ -112,6 +128,33 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
   const loadAnalytics = async () => {
     const a = await api.getAnalytics();
     setAnalytics(a);
+    if (a?.searchAnalytics) {
+      setSearchAnalytics(a.searchAnalytics);
+    }
+  };
+
+  const loadSearchAnalytics = async () => {
+    try {
+      const s = await api.getSearchAnalytics();
+      if (s) setSearchAnalytics(s);
+    } catch (e) {
+      console.error('Failed to load search analytics', e);
+    }
+  };
+
+  const handleLaunchGarmentFromSearch = (term: string, category?: string) => {
+    setActiveTab('products');
+    setIsNewProductOpen(true);
+    const cat = category === 'hoodies' || category === 'shirts' || category === 'sweatshirts' || category === 'pants'
+      ? category
+      : 'shirts';
+    setNewProduct((prev) => ({
+      ...prev,
+      title: term.toUpperCase(),
+      category: cat,
+      description: `New garment created from customer search demand: "${term}". Heavyweight archive build.`,
+    }));
+    showToast(`✓ Pre-filled garment creator with "${term.toUpperCase()}"!`);
   };
 
   const loadReviews = async () => {
@@ -130,18 +173,51 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
     }
   };
 
+  const loadStaffList = async () => {
+    try {
+      const res = await api.getInternalStaff();
+      if (res.success && res.staff) {
+        setStaffList(res.staff);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   useEffect(() => {
     if (isOpen) {
       loadWaitlist();
+      loadStaffList();
       if (activeTab === 'orders') loadOrders();
       if (activeTab === 'inventory') loadInventory();
       if (activeTab === 'marketing') loadMarketing();
-      if (activeTab === 'analytics') loadAnalytics();
+      if (activeTab === 'analytics') {
+        loadAnalytics();
+        loadSearchAnalytics();
+      }
       if (activeTab === 'products') loadInventory();
       if (activeTab === 'reviews') loadReviews();
       if (activeTab === 'waitlist') loadWaitlist();
+      if (activeTab === 'team') loadStaffList();
     }
   }, [isOpen, activeTab, orderFilter, waitlistProductFilter, waitlistSearch]);
+
+  // Role permissions computation
+  const userRole = currentStaffUser?.role || 'admin';
+  const isStaff = userRole === 'staff';
+  const isManager = userRole === 'manager';
+  const isAdmin = userRole === 'admin';
+
+  const isTabAllowed = (tabId: string) => {
+    if (isAdmin) return true;
+    if (isManager) {
+      return ['orders', 'inventory', 'products', 'waitlist', 'reviews', 'analytics', 'team'].includes(tabId);
+    }
+    if (isStaff) {
+      return ['orders', 'inventory', 'waitlist', 'team'].includes(tabId);
+    }
+    return true;
+  };
 
   // Waitlist Actions
   const handleDeleteWaitlist = async (id: string) => {
@@ -413,23 +489,52 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
         )}
 
         {/* Console Header Bar */}
-        <div className="flex items-center justify-between border-b-2 border-black pb-3 mb-3 flex-shrink-0">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b-2 border-black pb-3 mb-3 flex-shrink-0 gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="w-3 h-3 bg-red-600 rounded-full animate-pulse border border-black" />
             <h2 className="font-headline font-black text-lg sm:text-2xl text-black uppercase tracking-tight">
               TO KNOW NOTHING // ARCHIVE CONTROL ROOM
             </h2>
-            <span className="bg-black text-yellow-300 text-[10px] font-mono-tag font-bold px-2 py-0.5 uppercase hidden sm:inline">
-              REST BACKEND ONLINE (PORT 3000)
+            <span
+              className={`text-[10px] font-mono-tag font-bold px-2 py-0.5 uppercase border border-black ${
+                userRole === 'admin'
+                  ? 'bg-yellow-300 text-black'
+                  : userRole === 'manager'
+                  ? 'bg-blue-300 text-black'
+                  : 'bg-emerald-300 text-black'
+              }`}
+            >
+              ★ {userRole.toUpperCase()}: {currentStaffUser?.name || 'Alexander Wright'}
             </span>
           </div>
 
-          <button
-            onClick={onClose}
-            className="bg-black hover:bg-neutral-800 text-white font-mono-tag text-xs font-bold px-3 py-1 border border-black shadow-xs active:translate-y-0.5"
-          >
-            [✕ CLOSE / RETURN TO STORE]
-          </button>
+          <div className="flex items-center gap-2">
+            {onOpenStaffAuth && (
+              <button
+                type="button"
+                onClick={onOpenStaffAuth}
+                className="bg-white hover:bg-neutral-100 text-black font-mono-tag text-xs font-bold px-2.5 py-1 border border-black shadow-xs active:translate-y-0.5 uppercase flex items-center gap-1 cursor-pointer"
+              >
+                <span>🔄</span>
+                <span>SWITCH ROLE</span>
+              </button>
+            )}
+            {onStaffLogout && currentStaffUser && (
+              <button
+                type="button"
+                onClick={onStaffLogout}
+                className="bg-red-100 hover:bg-red-200 text-red-800 font-mono-tag text-xs font-bold px-2 py-1 border border-black shadow-xs active:translate-y-0.5 uppercase cursor-pointer"
+              >
+                LOGOUT
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="bg-black hover:bg-neutral-800 text-white font-mono-tag text-xs font-bold px-3 py-1 border border-black shadow-xs active:translate-y-0.5 cursor-pointer"
+            >
+              [✕ CLOSE]
+            </button>
+          </div>
         </div>
 
         {/* Navigation Tabs */}
@@ -441,33 +546,90 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
             { id: 'waitlist', label: 'WAITLIST (NOTIFY ME)', badge: `${waitlist.filter((w) => w.status === 'waiting').length} WAITING` },
             { id: 'reviews', label: 'COMMUNITY REVIEWS', badge: `${reviews.length}` },
             { id: 'marketing', label: 'MARKETING & PROMOS', badge: `${promos.length} CODES` },
-            { id: 'analytics', label: 'ANALYTICS & REVENUE' },
+            { id: 'analytics', label: 'ANALYTICS & SEARCH TRACKER', badge: searchAnalytics?.zeroResultCount ? `${searchAnalytics.zeroResultCount} UNMET` : 'SEARCH INTEL' },
             { id: 'meta', label: 'META TAG MANAGER', badge: 'SEO / OG' },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
-              className={`px-3 py-1.5 border-2 border-black uppercase transition-all flex items-center gap-1.5 cursor-pointer ${
-                activeTab === tab.id
-                  ? 'bg-black text-yellow-300 shadow-[2px_2px_0px_#000]'
-                  : 'bg-white hover:bg-yellow-100 text-black'
-              }`}
-            >
-              <span>{tab.label}</span>
-              {tab.badge && (
-                <span className={`text-[9px] px-1 py-0.2 rounded-xs ${
-                  activeTab === tab.id ? 'bg-yellow-300 text-black' : 'bg-neutral-200 text-neutral-800'
-                }`}>
-                  {tab.badge}
-                </span>
-              )}
-            </button>
-          ))}
+            { id: 'team', label: '👥 STAFF & ROLES', badge: `${staffList.length || 3}` },
+            { id: 'gemini_chat', label: '🤖 GEMINI CHATBOT', badge: 'PRO/FLASH/LITE' },
+            { id: 'gemini_image', label: '🎨 IMAGE STUDIO', badge: '3.1 FLASH' },
+            { id: 'veo_video', label: '🎬 VEO 3 VIDEO', badge: 'VEO 3.1' },
+          ].map((tab) => {
+            const allowed = isTabAllowed(tab.id);
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={`px-3 py-1.5 border-2 border-black uppercase transition-all flex items-center gap-1.5 cursor-pointer ${
+                  activeTab === tab.id
+                    ? 'bg-black text-yellow-300 shadow-[2px_2px_0px_#000]'
+                    : allowed
+                    ? 'bg-white hover:bg-yellow-100 text-black'
+                    : 'bg-neutral-100 text-neutral-500 hover:bg-neutral-200'
+                }`}
+              >
+                {!allowed && <span>🔒</span>}
+                <span>{tab.label}</span>
+                {tab.badge && (
+                  <span
+                    className={`text-[9px] px-1 py-0.2 rounded-xs ${
+                      activeTab === tab.id
+                        ? 'bg-yellow-300 text-black'
+                        : allowed
+                        ? 'bg-neutral-200 text-neutral-800'
+                        : 'bg-neutral-300 text-neutral-600'
+                    }`}
+                  >
+                    {tab.badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
 
         {/* Scrollable Tab Body */}
         <div className="flex-1 overflow-y-auto pr-1">
 
+          {/* Access Restriction Screen for Restricted Roles */}
+          {!isTabAllowed(activeTab) ? (
+            <div className="p-8 bg-white border-4 border-black text-center space-y-4 max-w-lg mx-auto my-8 shadow-md">
+              <div className="w-12 h-12 bg-red-100 border-2 border-red-600 rounded-full flex items-center justify-center text-xl mx-auto">
+                🔒
+              </div>
+              <div>
+                <h3 className="font-headline font-black text-lg text-black uppercase tracking-tight">
+                  CLEARANCE RESTRICTED // {activeTab.toUpperCase()}
+                </h3>
+                <p className="font-mono-tag text-xs text-neutral-600 mt-1">
+                  Your current account role (<strong>{userRole.toUpperCase()}</strong>: {currentStaffUser?.name || 'Liam O’Connor'}) is not authorized for this studio module.
+                </p>
+                <div className="text-[11px] font-mono-tag text-neutral-700 mt-3 bg-[#f8f6ee] p-3 border border-neutral-300 text-left space-y-1">
+                  <div className="font-bold text-black uppercase">Role Clearance Breakdown:</div>
+                  <div>• <strong>Staff:</strong> Orders Fulfillment, Live Inventory, and Customer Waitlists.</div>
+                  <div>• <strong>Manager:</strong> Orders, Inventory, Garment Catalog, Waitlists, Reviews, and Analytics.</div>
+                  <div>• <strong>Admin:</strong> Unrestricted full command across all studio operations.</div>
+                </div>
+              </div>
+              <div className="flex flex-col sm:flex-row justify-center gap-2 pt-2">
+                {onOpenStaffAuth && (
+                  <button
+                    type="button"
+                    onClick={onOpenStaffAuth}
+                    className="bg-black text-yellow-300 font-bold px-4 py-2 text-xs font-mono-tag border border-black uppercase hover:bg-neutral-800 cursor-pointer"
+                  >
+                    SWITCH TO MANAGER / ADMIN ROLE →
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('orders')}
+                  className="bg-neutral-200 text-black font-bold px-3 py-2 text-xs font-mono-tag border border-black uppercase hover:bg-neutral-300 cursor-pointer"
+                >
+                  RETURN TO ORDERS
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
           {/* TAB 1: ORDERS MANAGEMENT */}
           {activeTab === 'orders' && (
             <div className="space-y-3 font-mono-tag">
@@ -1250,63 +1412,142 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
           {/* TAB 5: ANALYTICS & INTELLIGENCE */}
           {activeTab === 'analytics' && analytics && (
             <div className="space-y-3 font-mono-tag">
-              {/* Metrics Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                <div className="bg-white border-2 border-black p-3 shadow-xs">
-                  <span className="text-[10px] text-neutral-500 block uppercase">GROSS REVENUE</span>
-                  <span className="font-headline font-black text-xl text-black">£{analytics.grossRevenue.toFixed(2)}</span>
+              {/* Analytics Subview Navigation */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between bg-white border-2 border-black p-2.5 gap-2 shadow-xs">
+                <div className="flex items-center gap-2">
+                  <span className="font-headline font-black text-xs text-black uppercase">
+                    ANALYTICS MODULE:
+                  </span>
+                  <div className="flex flex-wrap gap-1.5 text-xs font-bold">
+                    <button
+                      onClick={() => setAnalyticsSubTab('overview')}
+                      className={`px-3 py-1 border border-black transition-colors ${
+                        analyticsSubTab === 'overview'
+                          ? 'bg-black text-yellow-300'
+                          : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-800'
+                      }`}
+                    >
+                      REVENUE & ORDERS
+                    </button>
+                    <button
+                      onClick={() => setAnalyticsSubTab('search')}
+                      className={`px-3 py-1 border border-black transition-colors flex items-center gap-1.5 ${
+                        analyticsSubTab === 'search'
+                          ? 'bg-[#feef89] text-black font-black'
+                          : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-800'
+                      }`}
+                    >
+                      <span>STOREFRONT SEARCH TRACKER</span>
+                      <span className="bg-red-600 text-white text-[9px] px-1.5 py-0.2 font-bold">
+                        {searchAnalytics?.zeroResultCount ?? 5} UNMET DEMAND
+                      </span>
+                    </button>
+                  </div>
                 </div>
-                <div className="bg-white border-2 border-black p-3 shadow-xs">
-                  <span className="text-[10px] text-neutral-500 block uppercase">TOTAL ORDERS</span>
-                  <span className="font-headline font-black text-xl text-black">{analytics.totalOrders} ORDERS</span>
-                </div>
-                <div className="bg-white border-2 border-black p-3 shadow-xs">
-                  <span className="text-[10px] text-neutral-500 block uppercase">UNITS DISPATCHED</span>
-                  <span className="font-headline font-black text-xl text-black">{analytics.totalUnitsSold} UNITS</span>
-                </div>
-                <div className="bg-white border-2 border-black p-3 shadow-xs">
-                  <span className="text-[10px] text-neutral-500 block uppercase">AVERAGE ORDER VALUE (AOV)</span>
-                  <span className="font-headline font-black text-xl text-black">£{analytics.averageOrderValue.toFixed(2)}</span>
+
+                <div className="text-[10px] text-neutral-600 font-typewriter">
+                  {analyticsSubTab === 'search' ? (
+                    <span>Revealing what customers want vs what&apos;s missing in stock</span>
+                  ) : (
+                    <span>Real-time financial performance & fulfillment pipeline</span>
+                  )}
                 </div>
               </div>
 
-              {/* Order Pipeline Status Visualizer */}
-              <div className="bg-white border-2 border-black p-3 space-y-2">
-                <h4 className="font-headline font-bold text-xs text-black uppercase">
-                  ORDER PIPELINE STATUS BREAKDOWN
-                </h4>
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center text-xs">
-                  {Object.entries(analytics.ordersByStatus).map(([status, count]) => (
-                    <div key={status} className="border border-black p-2 bg-[#fcfbf7]">
-                      <span className="text-[10px] text-neutral-500 uppercase block">{status}</span>
-                      <span className="font-headline font-black text-lg text-black">{count}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Top Selling Products */}
-              <div className="bg-white border-2 border-black p-3 space-y-2">
-                <h4 className="font-headline font-bold text-xs text-black uppercase">
-                  TOP PERFORMING GARMENTS (BY REVENUE)
-                </h4>
-                <div className="space-y-1.5">
-                  {analytics.topProducts.map((tp, rank) => (
-                    <div key={tp.id} className="flex justify-between items-center border-b border-dashed border-neutral-300 pb-1 text-xs">
-                      <div className="flex items-center gap-2">
-                        <span className="w-5 h-5 bg-black text-yellow-300 font-bold flex items-center justify-center text-[10px]">
-                          #{rank + 1}
+              {/* Subtab 1: Revenue & Orders Overview */}
+              {analyticsSubTab === 'overview' && (
+                <div className="space-y-3">
+                  {/* Storefront Search Demand Teaser Banner */}
+                  <div className="bg-[#feef89] border-2 border-black p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 shadow-[2px_2px_0px_#000]">
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-3 h-3 bg-red-600 rounded-full animate-ping" />
+                      <div>
+                        <span className="font-headline font-bold text-xs text-black uppercase block">
+                          CUSTOMER SEARCH DEMAND INSIGHT: {searchAnalytics?.totalSearches ?? 0} SEARCHES LOGGED
                         </span>
-                        <span className="font-bold text-black">{tp.title}</span>
-                      </div>
-                      <div className="flex gap-4">
-                        <span className="text-neutral-600">{tp.unitsSold} units</span>
-                        <span className="font-black text-black">£{tp.revenue.toFixed(2)}</span>
+                        <span className="text-[11px] text-neutral-800 font-typewriter">
+                          {searchAnalytics?.zeroResultRate ?? 0}% of storefront searches returned 0 catalog items.
+                          Top unmet piece: &ldquo;{searchAnalytics?.unmetDemandTerms?.[0]?.term || 'beanie'}&rdquo;.
+                        </span>
                       </div>
                     </div>
-                  ))}
+                    <button
+                      onClick={() => setAnalyticsSubTab('search')}
+                      className="bg-black hover:bg-neutral-800 text-yellow-300 font-mono-tag font-bold text-[10px] px-3 py-1.5 border border-black uppercase whitespace-nowrap shadow-xs cursor-pointer"
+                    >
+                      VIEW SEARCH TRACKER →
+                    </button>
+                  </div>
+
+                  {/* Metrics Grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    <div className="bg-white border-2 border-black p-3 shadow-xs">
+                      <span className="text-[10px] text-neutral-500 block uppercase">GROSS REVENUE</span>
+                      <span className="font-headline font-black text-xl text-black">£{analytics.grossRevenue.toFixed(2)}</span>
+                    </div>
+                    <div className="bg-white border-2 border-black p-3 shadow-xs">
+                      <span className="text-[10px] text-neutral-500 block uppercase">TOTAL ORDERS</span>
+                      <span className="font-headline font-black text-xl text-black">{analytics.totalOrders} ORDERS</span>
+                    </div>
+                    <div className="bg-white border-2 border-black p-3 shadow-xs">
+                      <span className="text-[10px] text-neutral-500 block uppercase">UNITS DISPATCHED</span>
+                      <span className="font-headline font-black text-xl text-black">{analytics.totalUnitsSold} UNITS</span>
+                    </div>
+                    <div className="bg-white border-2 border-black p-3 shadow-xs">
+                      <span className="text-[10px] text-neutral-500 block uppercase">AVERAGE ORDER VALUE (AOV)</span>
+                      <span className="font-headline font-black text-xl text-black">£{analytics.averageOrderValue.toFixed(2)}</span>
+                    </div>
+                  </div>
+
+                  {/* Order Pipeline Status Visualizer */}
+                  <div className="bg-white border-2 border-black p-3 space-y-2">
+                    <h4 className="font-headline font-bold text-xs text-black uppercase">
+                      ORDER PIPELINE STATUS BREAKDOWN
+                    </h4>
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center text-xs">
+                      {Object.entries(analytics.ordersByStatus).map(([status, count]) => (
+                        <div key={status} className="border border-black p-2 bg-[#fcfbf7]">
+                          <span className="text-[10px] text-neutral-500 uppercase block">{status}</span>
+                          <span className="font-headline font-black text-lg text-black">{count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Top Selling Products */}
+                  <div className="bg-white border-2 border-black p-3 space-y-2">
+                    <h4 className="font-headline font-bold text-xs text-black uppercase">
+                      TOP PERFORMING GARMENTS (BY REVENUE)
+                    </h4>
+                    <div className="space-y-1.5">
+                      {analytics.topProducts.map((tp, rank) => (
+                        <div key={tp.id} className="flex justify-between items-center border-b border-dashed border-neutral-300 pb-1 text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="w-5 h-5 bg-black text-yellow-300 font-bold flex items-center justify-center text-[10px]">
+                              #{rank + 1}
+                            </span>
+                            <span className="font-bold text-black">{tp.title}</span>
+                          </div>
+                          <div className="flex gap-4">
+                            <span className="text-neutral-600">{tp.unitsSold} units</span>
+                            <span className="font-black text-black">£{tp.revenue.toFixed(2)}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {/* Subtab 2: Storefront Search Analytics & Unmet Demand Tracker */}
+              {analyticsSubTab === 'search' && (
+                <SearchAnalyticsTracker
+                  searchAnalytics={searchAnalytics || analytics.searchAnalytics}
+                  onRefresh={loadSearchAnalytics}
+                  onLaunchGarment={handleLaunchGarmentFromSearch}
+                  showToast={showToast}
+                />
+              )}
             </div>
           )}
 
@@ -1859,6 +2100,204 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
                 </div>
               )}
             </div>
+          )}
+
+          {/* TAB 9: GEMINI MULTI-TURN CHATBOT (FULL ADMIN AUTHORITY) */}
+          {activeTab === 'gemini_chat' && (
+            <GeminiChatbotTab
+              onNavigateTab={(tab) => setActiveTab(tab)}
+              onRefreshData={() => {
+                loadOrders();
+                loadInventory();
+                loadMarketing();
+                loadWaitlist();
+              }}
+            />
+          )}
+
+          {/* TAB 10: GEMINI IMAGE STUDIO (CREATE & EDIT) */}
+          {activeTab === 'gemini_image' && (
+            <GeminiImageStudioTab products={products} />
+          )}
+
+          {/* TAB 11: VEO 3 VIDEO STUDIO */}
+          {activeTab === 'veo_video' && (
+            <VeoVideoStudioTab />
+          )}
+
+          {/* TAB 12: STAFF, MANAGER & ADMIN ROLES (RBAC) */}
+          {activeTab === 'team' && (
+            <div className="space-y-4 font-mono-tag">
+              <div className="bg-white border-2 border-black p-4 space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-black pb-2">
+                  <div>
+                    <h3 className="font-headline font-black text-base text-black uppercase">
+                      INTERNAL STUDIO PERSONNEL & ROLE CLEARANCE
+                    </h3>
+                    <p className="text-xs text-neutral-600">
+                      Configure and test permissions across Staff, Manager, and Admin accounts.
+                    </p>
+                  </div>
+                  {onOpenStaffAuth && (
+                    <button
+                      type="button"
+                      onClick={onOpenStaffAuth}
+                      className="bg-black text-yellow-300 font-bold px-3 py-1.5 text-xs uppercase border border-black hover:bg-neutral-800"
+                    >
+                      OPEN LOGIN PORTAL →
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
+                  {/* Staff Card */}
+                  <div className={`p-3 border-2 ${userRole === 'staff' ? 'border-emerald-600 bg-emerald-50/50 shadow-xs' : 'border-neutral-300 bg-[#fbf9f3]'}`}>
+                    <div className="flex justify-between items-start mb-2">
+                      <span className="bg-emerald-200 text-emerald-900 border border-emerald-800 px-1.5 py-0.5 text-[9px] font-bold uppercase">
+                        STAFF ROLE
+                      </span>
+                      {userRole === 'staff' && (
+                        <span className="text-emerald-700 font-bold text-[10px]">● CURRENT ACTIVE</span>
+                      )}
+                    </div>
+                    <div className="font-headline font-bold text-sm text-black">Liam O’Connor</div>
+                    <div className="text-[11px] text-neutral-600">staff@toknownothing.com</div>
+                    <div className="text-[10px] text-neutral-500 mt-1">Fulfillment & Screenprint Pack</div>
+                    <div className="text-[10px] text-neutral-700 mt-2 border-t border-dashed border-neutral-300 pt-1.5 space-y-0.5">
+                      <div>✓ Inspect Incoming Orders</div>
+                      <div>✓ Print Royal Mail Dispatch Slips</div>
+                      <div>✓ Update Parcel Tracking Waybills</div>
+                      <div>✓ Monitor Live Stock & Restock Waitlist</div>
+                      <div className="text-neutral-400">✕ Garment Pricing / Deletion (Locked)</div>
+                      <div className="text-neutral-400">✕ Marketing Promos & Meta SEO (Locked)</div>
+                    </div>
+                    {onSwitchStaffUser && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const staffUser: InternalStaffUser = staffList.find((s) => s.role === 'staff') || {
+                            id: 'staff-01',
+                            email: 'staff@toknownothing.com',
+                            name: 'Liam O’Connor',
+                            role: 'staff',
+                            department: 'Fulfillment & Packing',
+                            lastLogin: new Date().toISOString(),
+                            permissions: ['orders:read', 'orders:pack', 'orders:ship', 'inventory:read', 'waitlist:read'],
+                          };
+                          onSwitchStaffUser(staffUser);
+                          showToast('Switched session to Staff: Liam O’Connor');
+                        }}
+                        className="w-full mt-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs uppercase transition-colors"
+                      >
+                        ACTIVATE STAFF ROLE
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Manager Card */}
+                  <div className={`p-3 border-2 ${userRole === 'manager' ? 'border-blue-600 bg-blue-50/50 shadow-xs' : 'border-neutral-300 bg-[#fbf9f3]'}`}>
+                    <div className="flex justify-between items-start mb-2">
+                      <span className="bg-blue-200 text-blue-900 border border-blue-800 px-1.5 py-0.5 text-[9px] font-bold uppercase">
+                        MANAGER ROLE
+                      </span>
+                      {userRole === 'manager' && (
+                        <span className="text-blue-700 font-bold text-[10px]">● CURRENT ACTIVE</span>
+                      )}
+                    </div>
+                    <div className="font-headline font-bold text-sm text-black">Sofia Chen</div>
+                    <div className="text-[11px] text-neutral-600">manager@toknownothing.com</div>
+                    <div className="text-[10px] text-neutral-500 mt-1">Floor Ops & Inventory Lead</div>
+                    <div className="text-[10px] text-neutral-700 mt-2 border-t border-dashed border-neutral-300 pt-1.5 space-y-0.5">
+                      <div>✓ All Staff Fulfillment Capabilities</div>
+                      <div>✓ Cancel Orders & Restock Inventory</div>
+                      <div>✓ Edit Garment Catalogue & Stock Levels</div>
+                      <div>✓ Dispatch Customer Waitlist Alerts</div>
+                      <div>✓ Moderate Community Reviews</div>
+                      <div>✓ Store Analytics & Unmet Search Tracker</div>
+                      <div className="text-neutral-400">✕ Marketing Promos / Gemini Studio (Admin Only)</div>
+                    </div>
+                    {onSwitchStaffUser && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const mgrUser: InternalStaffUser = staffList.find((s) => s.role === 'manager') || {
+                            id: 'manager-01',
+                            email: 'manager@toknownothing.com',
+                            name: 'Sofia Chen',
+                            role: 'manager',
+                            department: 'Operations & Inventory Lead',
+                            lastLogin: new Date().toISOString(),
+                            permissions: ['orders:read', 'orders:pack', 'orders:ship', 'orders:cancel', 'inventory:read', 'inventory:write', 'products:write', 'waitlist:write', 'reviews:moderate', 'analytics:read'],
+                          };
+                          onSwitchStaffUser(mgrUser);
+                          showToast('Switched session to Manager: Sofia Chen');
+                        }}
+                        className="w-full mt-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white font-bold text-xs uppercase transition-colors"
+                      >
+                        ACTIVATE MANAGER ROLE
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Admin Card */}
+                  <div className={`p-3 border-2 ${userRole === 'admin' ? 'border-yellow-600 bg-yellow-50/50 shadow-xs' : 'border-neutral-300 bg-[#fbf9f3]'}`}>
+                    <div className="flex justify-between items-start mb-2">
+                      <span className="bg-yellow-300 text-black border border-black px-1.5 py-0.5 text-[9px] font-bold uppercase">
+                        ADMIN ROLE
+                      </span>
+                      {userRole === 'admin' && (
+                        <span className="text-black font-bold text-[10px]">● CURRENT ACTIVE</span>
+                      )}
+                    </div>
+                    <div className="font-headline font-bold text-sm text-black">Alexander Wright</div>
+                    <div className="text-[11px] text-neutral-600">admin@toknownothing.com</div>
+                    <div className="text-[10px] text-neutral-500 mt-1">Creative Director & Full Command</div>
+                    <div className="text-[10px] text-neutral-700 mt-2 border-t border-dashed border-neutral-300 pt-1.5 space-y-0.5">
+                      <div>✓ Unrestricted Studio Command</div>
+                      <div>✓ Create & Delete Archive Promo Codes</div>
+                      <div>✓ Edit Live Drop Announcement Banner</div>
+                      <div>✓ Production SEO & OpenGraph Meta Tags</div>
+                      <div>✓ Gemini 2.5 Pro / Flash AI Automation</div>
+                      <div>✓ Veo 3 Video Studio & Image Generation</div>
+                    </div>
+                    {onSwitchStaffUser && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const adminUser: InternalStaffUser = staffList.find((s) => s.role === 'admin') || {
+                            id: 'admin-01',
+                            email: 'admin@toknownothing.com',
+                            name: 'Alexander Wright',
+                            role: 'admin',
+                            department: 'Creative Director & Executive',
+                            lastLogin: new Date().toISOString(),
+                            permissions: ['*'],
+                          };
+                          onSwitchStaffUser(adminUser);
+                          showToast('Switched session to Admin: Alexander Wright');
+                        }}
+                        className="w-full mt-3 py-1.5 bg-black hover:bg-neutral-800 text-yellow-300 font-bold text-xs uppercase transition-colors"
+                      >
+                        ACTIVATE ADMIN ROLE
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Password Reference info */}
+                <div className="p-3 bg-neutral-900 text-neutral-200 border border-black text-xs space-y-1">
+                  <div className="font-bold text-yellow-300 uppercase">INTERNAL CREDENTIALS QUICK REFERENCE (PORT 3000):</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] pt-1">
+                    <div>• <strong>Staff:</strong> staff@toknownothing.com / <span className="font-mono text-white">staff2026</span></div>
+                    <div>• <strong>Manager:</strong> manager@toknownothing.com / <span className="font-mono text-white">manager2026</span></div>
+                    <div>• <strong>Admin:</strong> admin@toknownothing.com / <span className="font-mono text-white">tkn2026</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+            </>
           )}
 
         </div>

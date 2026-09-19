@@ -1,5 +1,5 @@
 import React from 'react';
-import { CategoryId } from '../types';
+import { CategoryId, CustomerProfile, InternalStaffUser } from '../types';
 
 interface NavigationSidebarProps {
   activeCategory: CategoryId;
@@ -14,8 +14,13 @@ interface NavigationSidebarProps {
   onOpenSketchInfo: () => void;
   onOpenAdmin: () => void;
   onOpenTracker: () => void;
+  onOpenConcierge?: () => void;
   wishlistCount?: number;
   onOpenWishlist?: () => void;
+  onOpenCustomerAccount?: () => void;
+  currentCustomer?: CustomerProfile | null;
+  onOpenStaffAuth?: () => void;
+  currentStaffUser?: InternalStaffUser | null;
 }
 
 export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
@@ -24,8 +29,13 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
   onOpenSketchInfo,
   onOpenAdmin,
   onOpenTracker,
+  onOpenConcierge,
   wishlistCount = 0,
   onOpenWishlist,
+  onOpenCustomerAccount,
+  currentCustomer = null,
+  onOpenStaffAuth,
+  currentStaffUser = null,
 }) => {
   return (
     <aside 
@@ -160,6 +170,30 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
             </div>
           </button>
 
+          {/* SOCIAL FEED / COMMUNITY FIT PICS */}
+          <button
+            id="nav-social-feed"
+            onClick={() => onSelectCategory('social')}
+            className={`w-full text-left p-1.5 sm:p-2 border-2 border-black relative transition-all active:translate-y-0.5 ${
+              activeCategory === 'social'
+                ? 'bg-black text-yellow-300 shadow-[2px_2px_0px_#feef89]'
+                : 'bg-[#fbf9f3] text-black hover:bg-white shadow-[2px_2px_0px_#000000]'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-1">
+              <span className="font-headline font-black text-[10px] sm:text-[11px] tracking-tight flex items-center gap-1">
+                <span>📸</span>
+                <span>SOCIAL FEED</span>
+              </span>
+              <span className="bg-gradient-to-r from-purple-600 to-pink-500 text-white text-[7px] font-mono-tag font-extrabold px-1 py-0.2 uppercase border border-black animate-pulse">
+                LIVE
+              </span>
+            </div>
+            <div className="text-[8px] sm:text-[9px] font-mono-tag text-neutral-500 uppercase tracking-tighter mt-0.5">
+              IG & TT FIT PICS
+            </div>
+          </button>
+
           {/* View Complete Archive */}
           {activeCategory !== 'all' && (
             <button
@@ -212,6 +246,18 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
           </button>
         )}
 
+        {onOpenConcierge && (
+          <button
+            id="nav-concierge-button"
+            onClick={onOpenConcierge}
+            className="w-full bg-black hover:bg-neutral-900 text-yellow-300 border-2 border-black p-1 text-[9px] sm:text-[10px] font-mono-tag font-black uppercase shadow-[2px_2px_0px_#000] active:translate-y-0.5 flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+            title="Chat with TKN - AI Storefront Concierge"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span>✦ TKN BOT (AI)</span>
+          </button>
+        )}
+
         <button
           onClick={onOpenTracker}
           className="w-full bg-[#fbf9f3] hover:bg-white text-black border-2 border-black p-1 text-[9px] sm:text-[10px] font-mono-tag font-bold uppercase shadow-[1px_1px_0px_#000] flex items-center justify-center gap-1 cursor-pointer"
@@ -220,12 +266,33 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
           <span>TRACK ORDER</span>
         </button>
 
+        {onOpenCustomerAccount && (
+          <button
+            id="nav-customer-account-button"
+            onClick={onOpenCustomerAccount}
+            className={`w-full border-2 border-black p-1 text-[9px] sm:text-[10px] font-mono-tag font-bold uppercase shadow-[1px_1px_0px_#000] active:translate-y-0.5 flex items-center justify-between px-2 cursor-pointer transition-colors ${
+              currentCustomer
+                ? 'bg-yellow-300 text-black font-black'
+                : 'bg-[#fbf9f3] hover:bg-white text-black'
+            }`}
+            title="Member Profile & Orders"
+          >
+            <span className="flex items-center gap-1">
+              <span>👤</span>
+              <span>{currentCustomer ? currentCustomer.name.split(' ')[0].toUpperCase() : 'MEMBER'}</span>
+            </span>
+            <span className="text-[7px] bg-black text-yellow-300 px-1 py-0.2 font-mono">
+              {currentCustomer ? (currentCustomer.tier === 'VIP_ARCHIVE_PATRON' ? 'VIP' : 'ACTIVE') : 'LOGIN'}
+            </span>
+          </button>
+        )}
+
         <button
           onClick={onOpenAdmin}
           className="w-full bg-yellow-300 hover:bg-yellow-400 text-black border-2 border-black p-1 text-[9px] sm:text-[10px] font-mono-tag font-black uppercase shadow-[2px_2px_0px_#000] active:translate-y-0.5 flex items-center justify-center gap-1"
         >
           <span>⚡</span>
-          <span>ADMIN CONSOLE</span>
+          <span>{currentStaffUser ? `${currentStaffUser.role.toUpperCase()} CONSOLE` : 'STUDIO CONSOLE'}</span>
         </button>
 
         <div className="bg-[#111111] border-2 border-neutral-700 p-1.5 text-center shadow-[2px_2px_0px_#000000] relative">

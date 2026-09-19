@@ -5,11 +5,14 @@ import { CurrencyCode, formatMoney } from '../utils/currency';
 import { playStampSound, playPaperRustle } from '../utils/audio';
 import { api } from '../lib/api';
 import { SizeGuideModal } from './SizeGuideModal';
+import { generateZinePdf } from '../utils/zinePdfGenerator';
+import { Product360Viewer } from './Product360Viewer';
 
 interface PhotoStudioModalProps {
   product: ProductItem | null;
   initialSlide?: number;
   initialMode?: 'gallery' | 'zoom';
+  initialViewMode?: 'still' | '360';
   currency?: CurrencyCode;
   isStashed?: boolean;
   onToggleStash?: (product: ProductItem) => void;
@@ -23,6 +26,7 @@ export const PhotoStudioModal: React.FC<PhotoStudioModalProps> = ({
   product,
   initialSlide = 0,
   initialMode = 'gallery',
+  initialViewMode = 'still',
   currency = 'GBP',
   isStashed = false,
   onToggleStash,
@@ -32,6 +36,7 @@ export const PhotoStudioModal: React.FC<PhotoStudioModalProps> = ({
   onOpenNotifyMe,
 }) => {
   const [modalMode, setModalMode] = useState<'gallery' | 'zoom'>(initialMode);
+  const [viewMode, setViewMode] = useState<'still' | '360'>(initialViewMode);
   const [activeSlide, setActiveSlide] = useState(initialSlide);
   const [selectedSize, setSelectedSize] = useState<string>(
     product?.availableSizes?.[1] || product?.availableSizes?.[0] || 'L'
@@ -40,6 +45,8 @@ export const PhotoStudioModal: React.FC<PhotoStudioModalProps> = ({
   const [addedSuccess, setAddedSuccess] = useState(false);
   const [activeTab, setActiveTab] = useState<'specs' | 'reviews'>('specs');
   const [isInternalSizeGuideOpen, setIsInternalSizeGuideOpen] = useState(false);
+  const [isGeneratingZine, setIsGeneratingZine] = useState(false);
+  const [zineSuccessMsg, setZineSuccessMsg] = useState<string | null>(null);
 
   // Reviews State
   const [reviews, setReviews] = useState<ProductReview[]>([]);
@@ -65,9 +72,15 @@ export const PhotoStudioModal: React.FC<PhotoStudioModalProps> = ({
     }
   }, [product]);
 
-  // Handle global Escape key to close modals
+  // Handle global Escape key to close modals & R/3 to toggle 360 viewer
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger if user is typing in a textarea or input (like reviews)
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        return;
+      }
+
       if (e.key === 'Escape') {
         e.preventDefault();
         if (isInternalSizeGuideOpen) {
@@ -76,6 +89,15 @@ export const PhotoStudioModal: React.FC<PhotoStudioModalProps> = ({
           setModalMode('gallery');
         } else {
           onClose();
+        }
+      } else if (e.key === 'r' || e.key === 'R' || e.key === '3') {
+        e.preventDefault();
+        playPaperRustle();
+        if (modalMode === 'gallery') {
+          setViewMode('360');
+          setModalMode('zoom');
+        } else {
+          setViewMode((prev) => (prev === '360' ? 'still' : '360'));
         }
       }
     };
@@ -96,6 +118,29 @@ export const PhotoStudioModal: React.FC<PhotoStudioModalProps> = ({
     onAddToCart(product, selectedSize, activeSlide);
     setAddedSuccess(true);
     setTimeout(() => setAddedSuccess(false), 2000);
+  };
+
+  const handleDownloadZine = async () => {
+    if (!product || isGeneratingZine) return;
+    setIsGeneratingZine(true);
+    playPaperRustle();
+    try {
+      await generateZinePdf({
+        product,
+        activeAngleIndex: activeSlide,
+        selectedSize,
+        currency,
+        onToast: (msg) => {
+          setZineSuccessMsg(msg);
+          setTimeout(() => setZineSuccessMsg(null), 3500);
+        },
+      });
+      playStampSound();
+    } catch (err) {
+      console.error('Failed to generate zine spec page PDF', err);
+    } finally {
+      setIsGeneratingZine(false);
+    }
   };
 
   const handlePostReview = async (e: React.FormEvent) => {
@@ -173,10 +218,33 @@ export const PhotoStudioModal: React.FC<PhotoStudioModalProps> = ({
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
               <span className="bg-[#feef89] border border-black px-2 py-0.5 text-[9px] sm:text-[10px] font-mono-tag font-bold uppercase hidden md:inline-block">
                 {product.title}
               </span>
+              <button
+                id="open360FromGalleryBtn"
+                onClick={() => {
+                  playPaperRustle();
+                  setViewMode('360');
+                  setModalMode('zoom');
+                }}
+                className="bg-black hover:bg-neutral-800 text-[#feef89] border-2 border-black px-2.5 py-1 text-[10px] sm:text-xs font-mono-tag font-black uppercase shadow-[2px_2px_0px_#000000] active:translate-y-0.5 flex items-center gap-1.5 cursor-pointer transition-colors"
+                title="Inspect garment in 360-degree rotation turntable"
+              >
+                <span>🔄</span>
+                <span>360° TURNTABLE</span>
+              </button>
+              <button
+                id="downloadZineGalleryBtn"
+                onClick={handleDownloadZine}
+                disabled={isGeneratingZine}
+                className="bg-[#feef89] hover:bg-yellow-300 text-black border-2 border-black px-2.5 py-1 text-[10px] sm:text-xs font-mono-tag font-black uppercase shadow-[2px_2px_0px_#000000] active:translate-y-0.5 flex items-center gap-1.5 cursor-pointer disabled:opacity-60 transition-colors"
+                title="Download printable A4 zine page PDF layout with polaroids and garment specs"
+              >
+                <span>📄</span>
+                <span>{isGeneratingZine ? 'COMPILING ZINE...' : 'DOWNLOAD AS ZINE PAGE'}</span>
+              </button>
               <button
                 id="closeFloatingGalleryBtn"
                 onClick={onClose}
@@ -215,14 +283,31 @@ export const PhotoStudioModal: React.FC<PhotoStudioModalProps> = ({
                     {/* 1:1 Aspect Ratio Photo Window */}
                     <div className={`relative w-full aspect-square ${angle.bgClass} border border-black overflow-hidden flex flex-col justify-between p-2`}>
                       
-                      {/* Top angle badge */}
+                      {/* Top angle badge & 360 quick-launch */}
                       <div className="flex justify-between items-center z-20">
                         <span className="bg-black/90 text-yellow-300 border border-yellow-400/80 text-[9px] font-mono-tag font-bold px-1.5 py-0.2">
                           {idx + 1}/{product.angles.length}
                         </span>
-                        <span className="bg-yellow-400 text-black text-[9px] font-mono-tag font-bold px-1 py-0.2 shadow-xs">
-                          ZOOM ⤢
-                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            id={`open360CardBtn_${idx}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              playPaperRustle();
+                              setActiveSlide(idx);
+                              setViewMode('360');
+                              setModalMode('zoom');
+                            }}
+                            className="bg-black text-[#feef89] hover:bg-neutral-800 border border-[#feef89] text-[9px] font-mono-tag font-black px-1.5 py-0.2 shadow-xs cursor-pointer flex items-center gap-0.5"
+                            title="Open in 360-degree rotation turntable"
+                          >
+                            <span>🔄</span>
+                            <span>360°</span>
+                          </button>
+                          <span className="bg-yellow-400 text-black text-[9px] font-mono-tag font-bold px-1 py-0.2 shadow-xs">
+                            ZOOM ⤢
+                          </span>
+                        </div>
                       </div>
 
                       {/* Garment Visual */}
@@ -244,7 +329,7 @@ export const PhotoStudioModal: React.FC<PhotoStudioModalProps> = ({
                         {angle.sublabel}
                       </p>
                       <div className="mt-1 flex items-center justify-center gap-1 text-[10px] font-mono-tag text-red-600 font-bold">
-                        <span>[CLICK TO ENLARGE]</span>
+                        <span>[CLICK TO ENLARGE / 360°]</span>
                       </div>
                     </div>
 
@@ -256,10 +341,18 @@ export const PhotoStudioModal: React.FC<PhotoStudioModalProps> = ({
 
           {/* Bottom helper prompt */}
           <div className="mt-8 bg-white/95 border border-black px-3 py-1 text-center font-typewriter text-xs text-black shadow-xs">
-            ★ ESC to close • Click any floating polaroid for macro fiber weave, specs sheet & size selection
+            ★ ESC to close • [R] or [3] to toggle 360° turntable • Click any floating polaroid for macro fiber weave, specs sheet & size selection
           </div>
 
         </div>
+
+        {/* Zine Download Toast Notification */}
+        {zineSuccessMsg && (
+          <div className="fixed bottom-6 right-6 z-50 bg-[#fff500] text-black border-2 border-black px-4 py-2 shadow-[4px_4px_0px_#000000] font-mono-tag text-xs font-black flex items-center gap-2">
+            <span>✓</span>
+            <span>{zineSuccessMsg}</span>
+          </div>
+        )}
       </div>
     );
   }
@@ -297,7 +390,33 @@ export const PhotoStudioModal: React.FC<PhotoStudioModalProps> = ({
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+            <button
+              id="toggle360HeaderBtn"
+              onClick={() => {
+                playPaperRustle();
+                setViewMode((prev) => (prev === '360' ? 'still' : '360'));
+              }}
+              className={`border-2 border-black px-2.5 py-1 text-xs font-mono-tag font-black uppercase shadow-[2px_2px_0px_#000000] active:translate-y-0.5 flex items-center gap-1.5 cursor-pointer transition-colors ${
+                viewMode === '360'
+                  ? 'bg-[#feef89] hover:bg-yellow-300 text-black'
+                  : 'bg-black text-[#feef89] hover:bg-neutral-800'
+              }`}
+              title="Toggle between still zoom inspection and 360-degree rotation viewer"
+            >
+              <span>🔄</span>
+              <span>{viewMode === '360' ? 'STILL ZOOM LENS' : '360° ROTATION VIEWER'}</span>
+            </button>
+            <button
+              id="downloadZinePageBtn"
+              onClick={handleDownloadZine}
+              disabled={isGeneratingZine}
+              className="bg-[#feef89] hover:bg-yellow-300 text-black border-2 border-black px-2.5 py-1 text-xs font-mono-tag font-black uppercase shadow-[2px_2px_0px_#000000] active:translate-y-0.5 flex items-center gap-1.5 cursor-pointer disabled:opacity-60 transition-colors"
+              title="Download printable A4 zine page PDF layout with polaroids and garment specs"
+            >
+              <span>📄</span>
+              <span>{isGeneratingZine ? 'COMPILING ZINE...' : 'DOWNLOAD AS ZINE PAGE'}</span>
+            </button>
             <button
               id="closeZoomModalBtn"
               onClick={onClose}
@@ -311,95 +430,160 @@ export const PhotoStudioModal: React.FC<PhotoStudioModalProps> = ({
         {/* Studio Content Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
           
-          {/* Left: Enlarged Polaroid with Zoom Controls */}
+          {/* Left: 360 Rotation Viewer / Enlarged Polaroid with Zoom Controls */}
           <div className="lg:col-span-7 flex flex-col items-center">
-            <div className="w-full max-w-md bg-white border-2 border-black p-3 pb-5 polaroid-drop-shadow relative">
-              
-              {/* Serrated Tape swatch */}
-              <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-20 h-5 masking-tape serrated-tape z-20 opacity-95 shadow" />
+            
+            {/* View Mode Switcher: Still vs 360 */}
+            <div className="w-full max-w-md flex items-center mb-3 border-2 border-black bg-neutral-200 p-0.5 shadow-[2px_2px_0px_#000000]">
+              <button
+                id="viewModeStillBtn"
+                onClick={() => {
+                  playPaperRustle();
+                  setViewMode('still');
+                }}
+                className={`flex-1 py-1.5 text-xs font-mono-tag font-black uppercase flex items-center justify-center gap-1.5 cursor-pointer transition-colors ${
+                  viewMode === 'still'
+                    ? 'bg-black text-[#feef89] shadow-xs'
+                    : 'text-neutral-700 hover:text-black hover:bg-white/60'
+                }`}
+              >
+                <span>🔍</span>
+                <span>STILL & MACRO ZOOM</span>
+              </button>
+              <button
+                id="viewMode360Btn"
+                onClick={() => {
+                  playPaperRustle();
+                  setViewMode('360');
+                }}
+                className={`flex-1 py-1.5 text-xs font-mono-tag font-black uppercase flex items-center justify-center gap-1.5 cursor-pointer transition-colors ${
+                  viewMode === '360'
+                    ? 'bg-black text-[#feef89] shadow-xs'
+                    : 'text-neutral-700 hover:text-black hover:bg-white/60'
+                }`}
+              >
+                <span>🔄</span>
+                <span>360° TURNTABLE</span>
+                <span className="bg-[#feef89] text-black text-[9px] px-1 py-0.2 font-black">DRAG</span>
+              </button>
+            </div>
 
-              {/* Photo Viewport */}
-              <div className={`relative w-full aspect-square ${currentAngle.bgClass} border border-black overflow-hidden flex flex-col justify-between p-2.5 select-none`}>
-                
-                {/* Top Overlay Controls */}
-                <div className="flex items-center justify-between z-20">
-                  <span className="bg-black/90 text-yellow-300 border border-yellow-400/40 text-[10px] font-mono-tag font-bold px-2 py-0.5">
-                    ANGLE {activeSlide + 1} OF {product.angles.length}
-                  </span>
+            {viewMode === '360' ? (
+              <Product360Viewer
+                product={product}
+                initialAngleIndex={activeSlide}
+                onAngleChange={(newIdx) => setActiveSlide(newIdx)}
+                onExit360={() => {
+                  playPaperRustle();
+                  setViewMode('still');
+                }}
+              />
+            ) : (
+              <>
+                <div className="w-full max-w-md bg-white border-2 border-black p-3 pb-5 polaroid-drop-shadow relative">
+                  
+                  {/* Serrated Tape swatch */}
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-20 h-5 masking-tape serrated-tape z-20 opacity-95 shadow" />
 
-                  {/* Zoom Lens Level Selector */}
-                  <div className="flex items-center gap-1 bg-black/90 p-0.5 border border-white/30">
-                    {(['1x', '2x', 'macro'] as const).map((lvl) => (
-                      <button
-                        key={lvl}
-                        onClick={() => setZoomLevel(lvl)}
-                        className={`text-[10px] font-mono-tag px-2 py-0.5 transition-colors uppercase ${
-                          zoomLevel === lvl
-                            ? 'bg-yellow-400 text-black font-bold'
-                            : 'text-white hover:text-yellow-200'
+                  {/* Photo Viewport */}
+                  <div className={`relative w-full aspect-square ${currentAngle.bgClass} border border-black overflow-hidden flex flex-col justify-between p-2.5 select-none`}>
+                    
+                    {/* Top Overlay Controls */}
+                    <div className="flex items-center justify-between z-20">
+                      <span className="bg-black/90 text-yellow-300 border border-yellow-400/40 text-[10px] font-mono-tag font-bold px-2 py-0.5">
+                        ANGLE {activeSlide + 1} OF {product.angles.length}
+                      </span>
+
+                      {/* Zoom Lens Level Selector */}
+                      <div className="flex items-center gap-1 bg-black/90 p-0.5 border border-white/30">
+                        {(['1x', '2x', 'macro'] as const).map((lvl) => (
+                          <button
+                            key={lvl}
+                            onClick={() => setZoomLevel(lvl)}
+                            className={`text-[10px] font-mono-tag px-2 py-0.5 transition-colors uppercase ${
+                              zoomLevel === lvl
+                                ? 'bg-yellow-400 text-black font-bold'
+                                : 'text-white hover:text-yellow-200'
+                            }`}
+                          >
+                            {lvl}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Garment Graphic with dynamic Zoom scale */}
+                    <div className="absolute inset-0 flex items-center justify-center p-4">
+                      <div
+                        className={`w-full h-full flex items-center justify-center transition-transform duration-300 ${
+                          zoomLevel === '1x'
+                            ? 'scale-100'
+                            : zoomLevel === '2x'
+                            ? 'scale-150 cursor-grab'
+                            : 'scale-[2.2] cursor-crosshair'
                         }`}
                       >
-                        {lvl}
-                      </button>
-                    ))}
+                        <GarmentGraphic angle={currentAngle} isZoomed={zoomLevel !== '1x'} />
+                      </div>
+                    </div>
+
+                    {/* Bottom Label inside Photo */}
+                    <div className="z-20 mt-auto pt-2 flex justify-center">
+                      <span className="font-marker text-sm md:text-base text-[#fff500] tracking-wide drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] text-center">
+                        {currentAngle.label}
+                      </span>
+                    </div>
                   </div>
+
+                  {/* Bottom Label on card */}
+                  <div className="mt-2.5 text-center">
+                    <h2 className="font-headline font-black text-lg text-black uppercase tracking-tight">
+                      {product.title}
+                    </h2>
+                    <p className="font-typewriter text-xs text-neutral-700 italic mt-0.5">
+                      {currentAngle.sublabel}
+                    </p>
+
+                    {/* Quick 360 Switch button */}
+                    <button
+                      id="switchTo360FromPolaroidBtn"
+                      onClick={() => {
+                        playPaperRustle();
+                        setViewMode('360');
+                      }}
+                      className="mt-2 bg-[#feef89] hover:bg-yellow-300 text-black border border-black px-2.5 py-1 text-[10px] font-mono-tag font-black uppercase shadow-xs flex items-center justify-center gap-1.5 mx-auto cursor-pointer transition-colors"
+                      title="Switch to 360-degree rotation viewer turntable"
+                    >
+                      <span>🔄</span>
+                      <span>DRAG & ROTATE 360° TURNTABLE</span>
+                      <span>➔</span>
+                    </button>
+                  </div>
+
                 </div>
 
-                {/* Garment Graphic with dynamic Zoom scale */}
-                <div className="absolute inset-0 flex items-center justify-center p-4">
-                  <div
-                    className={`w-full h-full flex items-center justify-center transition-transform duration-300 ${
-                      zoomLevel === '1x'
-                        ? 'scale-100'
-                        : zoomLevel === '2x'
-                        ? 'scale-150 cursor-grab'
-                        : 'scale-[2.2] cursor-crosshair'
-                    }`}
-                  >
-                    <GarmentGraphic angle={currentAngle} isZoomed={zoomLevel !== '1x'} />
-                  </div>
+                {/* Thumbnail Carousel Deck */}
+                <div className="flex items-center gap-2 mt-3 overflow-x-auto max-w-full pb-1">
+                  {product.angles.map((angle, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => setActiveSlide(idx)}
+                      className={`flex-shrink-0 w-14 h-14 border-2 p-0.5 relative transition-all ${
+                        activeSlide === idx
+                          ? 'border-black bg-yellow-100 scale-105 shadow-[2px_2px_0px_#000000]'
+                          : 'border-neutral-400 bg-white hover:border-black opacity-75'
+                      }`}
+                    >
+                      <div className={`w-full h-full ${angle.bgClass} flex items-center justify-center overflow-hidden`}>
+                        <span className="text-[9px] font-mono-tag font-bold text-white drop-shadow">
+                          {idx + 1}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
                 </div>
-
-                {/* Bottom Label inside Photo */}
-                <div className="z-20 mt-auto pt-2 flex justify-center">
-                  <span className="font-marker text-sm md:text-base text-[#fff500] tracking-wide drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] text-center">
-                    {currentAngle.label}
-                  </span>
-                </div>
-              </div>
-
-              {/* Bottom Label on card */}
-              <div className="mt-2.5 text-center">
-                <h2 className="font-headline font-black text-lg text-black uppercase tracking-tight">
-                  {product.title}
-                </h2>
-                <p className="font-typewriter text-xs text-neutral-700 italic mt-0.5">
-                  {currentAngle.sublabel}
-                </p>
-              </div>
-
-            </div>
-
-            {/* Thumbnail Carousel Deck */}
-            <div className="flex items-center gap-2 mt-3 overflow-x-auto max-w-full pb-1">
-              {product.angles.map((angle, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => setActiveSlide(idx)}
-                  className={`flex-shrink-0 w-14 h-14 border-2 p-0.5 relative transition-all ${
-                    activeSlide === idx
-                      ? 'border-black bg-yellow-100 scale-105 shadow-[2px_2px_0px_#000000]'
-                      : 'border-neutral-400 bg-white hover:border-black opacity-75'
-                  }`}
-                >
-                  <div className={`w-full h-full ${angle.bgClass} flex items-center justify-center overflow-hidden`}>
-                    <span className="text-[9px] font-mono-tag font-bold text-white drop-shadow">
-                      {idx + 1}
-                    </span>
-                  </div>
-                </button>
-              ))}
-            </div>
+              </>
+            )}
 
           </div>
 
@@ -508,6 +692,37 @@ export const PhotoStudioModal: React.FC<PhotoStudioModalProps> = ({
                   <p className="font-typewriter text-xs text-neutral-800 pt-1 leading-relaxed border-t border-dashed border-neutral-400">
                     {product.description}
                   </p>
+                </div>
+
+                {/* Printable Zine Page Spec Sheet Card */}
+                <div className="bg-[#fbf9f3] border-2 border-black p-2.5 shadow-[2px_2px_0px_#000000] flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 bg-[#feef89] border border-black flex items-center justify-center font-bold text-sm shadow-xs flex-shrink-0">
+                      📄
+                    </div>
+                    <div>
+                      <div className="font-headline font-black text-xs uppercase tracking-tight text-black flex items-center gap-1.5">
+                        <span>PRINTABLE ZINE SPEC SHEET</span>
+                        <span className="bg-black text-[#fff500] text-[8px] font-mono-tag px-1 py-0.2 uppercase">
+                          PDF
+                        </span>
+                      </div>
+                      <p className="font-typewriter text-[10px] text-neutral-600">
+                        A4 printable specs • Polaroid photo contact sheet • Sizing matrix
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    id="downloadZinePageSpecsBtn"
+                    type="button"
+                    onClick={handleDownloadZine}
+                    disabled={isGeneratingZine}
+                    className="bg-black hover:bg-neutral-800 text-[#fff500] font-mono-tag text-xs font-bold px-3 py-1.5 border border-black shadow-[2px_2px_0px_#000000] active:translate-y-0.5 flex items-center gap-1 cursor-pointer disabled:opacity-60 transition-all flex-shrink-0"
+                    title="Download printable A4 zine page PDF layout with polaroids and garment specs"
+                  >
+                    <span>{isGeneratingZine ? 'COMPILING...' : 'DOWNLOAD AS ZINE PAGE'}</span>
+                    <span>➔</span>
+                  </button>
                 </div>
 
                 {/* Size Selector */}
@@ -781,6 +996,14 @@ export const PhotoStudioModal: React.FC<PhotoStudioModalProps> = ({
           setIsInternalSizeGuideOpen(false);
         }}
       />
+
+      {/* Zine Download Toast Notification */}
+      {zineSuccessMsg && (
+        <div className="fixed bottom-6 right-6 z-50 bg-[#fff500] text-black border-2 border-black px-4 py-2 shadow-[4px_4px_0px_#000000] font-mono-tag text-xs font-black flex items-center gap-2">
+          <span>✓</span>
+          <span>{zineSuccessMsg}</span>
+        </div>
+      )}
     </div>
   );
 };

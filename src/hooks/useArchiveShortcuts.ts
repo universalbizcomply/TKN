@@ -7,9 +7,11 @@ export interface ShortcutDefinition {
 }
 
 export const ARCHIVE_SHORTCUTS: ShortcutDefinition[] = [
+  { key: 'C', description: 'Open / toggle TKN (AI Customer Concierge bot)', category: 'Modals' },
   { key: 'B', description: 'Open / toggle Shopping Bag & checkout slip', category: 'Actions' },
   { key: 'W', description: 'Open / toggle Pinned Wishlist stash', category: 'Actions' },
   { key: 'G', description: 'Open 300-500GSM garment size guide & schematic', category: 'Modals' },
+  { key: 'R or 3', description: 'Toggle 360° product rotation turntable in studio', category: 'Actions' },
   { key: 'S or /', description: 'Quick-focus archive garment search', category: 'Actions' },
   { key: 'Esc', description: 'Close any active modal or blur search', category: 'Modals' },
   { key: 'T', description: 'Open live Royal Mail order tracking', category: 'Navigation' },
@@ -22,6 +24,7 @@ export interface UseArchiveShortcutsOptions {
   onToggleBag?: () => void;
   onToggleWishlist?: () => void;
   onToggleSizeGuide?: () => void;
+  onToggleConcierge?: () => void;
   onFocusSearch?: () => void;
   onCloseModals?: () => void;
   onOpenTracker?: () => void;
@@ -49,6 +52,7 @@ export function useArchiveShortcuts({
   onToggleBag,
   onToggleWishlist,
   onToggleSizeGuide,
+  onToggleConcierge,
   onFocusSearch,
   onCloseModals,
   onOpenTracker,
@@ -100,6 +104,12 @@ export function useArchiveShortcuts({
       const key = event.key;
 
       switch (key.toLowerCase()) {
+        case 'c': {
+          event.preventDefault();
+          onToggleConcierge?.();
+          break;
+        }
+
         case 'b': {
           event.preventDefault();
           onToggleBag?.();
@@ -163,6 +173,7 @@ export function useArchiveShortcuts({
     [
       enabled,
       onToggleBag,
+      onToggleConcierge,
       onFocusSearch,
       onCloseModals,
       onOpenTracker,

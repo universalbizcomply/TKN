@@ -131,3 +131,36 @@ export function playPaperRustle() {
     // Ignore
   }
 }
+
+// Mechanical ratchet click for 360 rotation viewer turntable
+let lastTickTime = 0;
+export function playTurntableTick() {
+  if (!soundEnabled) return;
+  const now = Date.now();
+  if (now - lastTickTime < 60) return; // Debounce fast ticks
+  lastTickTime = now;
+
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(600, t);
+    osc.frequency.exponentialRampToValueAtTime(180, t + 0.025);
+
+    gain.gain.setValueAtTime(0.06, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.025);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(t);
+    osc.stop(t + 0.03);
+  } catch {
+    // Ignore
+  }
+}

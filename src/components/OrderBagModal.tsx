@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { CartItem, Order } from '../types';
+import React, { useState, useEffect } from 'react';
+import { CartItem, Order, CustomerProfile } from '../types';
 import { api } from '../lib/api';
 import { CurrencyCode, formatMoney } from '../utils/currency';
 
@@ -12,6 +12,9 @@ interface OrderBagModalProps {
   onClearCart: () => void;
   onTrackOrder: (orderId: string) => void;
   currency?: CurrencyCode;
+  currentCustomer?: CustomerProfile | null;
+  onOpenCustomerAccount?: () => void;
+  onCustomerLogin?: (customer: CustomerProfile) => void;
 }
 
 export const OrderBagModal: React.FC<OrderBagModalProps> = ({
@@ -23,6 +26,9 @@ export const OrderBagModal: React.FC<OrderBagModalProps> = ({
   onClearCart,
   onTrackOrder,
   currency = 'GBP',
+  currentCustomer = null,
+  onOpenCustomerAccount,
+  onCustomerLogin,
 }) => {
   const [step, setStep] = useState<'bag' | 'checkout' | 'success'>('bag');
   const [promoCode, setPromoCode] = useState('');
@@ -31,18 +37,43 @@ export const OrderBagModal: React.FC<OrderBagModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
 
+  // Guest vs Member Checkout Mode
+  const [checkoutMode, setCheckoutMode] = useState<'guest' | 'member'>(currentCustomer ? 'member' : 'guest');
+  const [createAccountOnGuest, setCreateAccountOnGuest] = useState(false);
+  const [guestPassword, setGuestPassword] = useState('archive26');
+  const [inlineLoginEmail, setInlineLoginEmail] = useState('');
+  const [inlineLoginPass, setInlineLoginPass] = useState('');
+  const [inlineLoginError, setInlineLoginError] = useState<string | null>(null);
+
   // Form State - UK defaults
   const [customer, setCustomer] = useState({
-    name: 'Callum Davies',
-    email: 'callum.davies@hackneyskate.co.uk',
-    street: '14 Redchurch Street, Shoreditch',
-    city: 'London',
-    state: 'Greater London',
-    zip: 'E2 7DD',
-    country: 'United Kingdom',
+    name: currentCustomer?.name || 'Callum Davies',
+    email: currentCustomer?.email || 'callum.davies@hackneyskate.co.uk',
+    street: currentCustomer?.address?.street || '14 Redchurch Street, Shoreditch',
+    city: currentCustomer?.address?.city || 'London',
+    state: currentCustomer?.address?.state || 'Greater London',
+    zip: currentCustomer?.address?.zip || 'E2 7DD',
+    country: currentCustomer?.address?.country || 'United Kingdom',
   });
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'apple_pay' | 'crypto' | 'cash_on_delivery'>('card');
   const [cardNumber, setCardNumber] = useState('•••• •••• •••• 4242');
+
+  // Autofill when currentCustomer updates
+  useEffect(() => {
+    if (currentCustomer) {
+      setCustomer({
+        name: currentCustomer.name || '',
+        email: currentCustomer.email || '',
+        street: currentCustomer.address?.street || '',
+        city: currentCustomer.address?.city || 'London',
+        state: currentCustomer.address?.state || '',
+        zip: currentCustomer.address?.zip || '',
+        country: currentCustomer.address?.country || 'United Kingdom',
+      });
+      setCheckoutMode('member');
+    }
+  }, [currentCustomer]);
+
 
   if (!isOpen) return null;
 
@@ -81,10 +112,31 @@ export const OrderBagModal: React.FC<OrderBagModalProps> = ({
     }
   };
 
+  const handleInlineLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inlineLoginEmail) return;
+    setInlineLoginError(null);
+    try {
+      const res = await api.loginCustomer({
+        email: inlineLoginEmail.trim(),
+        password: inlineLoginPass.trim() || undefined,
+      });
+      if (res.success && res.customer) {
+        if (onCustomerLogin) onCustomerLogin(res.customer);
+        setCheckoutMode('member');
+      } else {
+        setInlineLoginError(res.error || 'Login failed.');
+      }
+    } catch (err: any) {
+      setInlineLoginError(err.message || 'Error logging in');
+    }
+  };
+
   const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
 
+    const isGuest = checkoutMode === 'guest';
     const payload = {
       customer,
       items: items.map((it) => ({
@@ -98,6 +150,9 @@ export const OrderBagModal: React.FC<OrderBagModalProps> = ({
       })),
       promoCode: discountPercent > 0 ? promoCode.toUpperCase() : undefined,
       paymentMethod,
+      isGuest,
+      createAccount: isGuest && createAccountOnGuest,
+      accountPassword: isGuest && createAccountOnGuest ? guestPassword : undefined,
     };
 
     const res = await api.createOrder(payload);
@@ -107,6 +162,9 @@ export const OrderBagModal: React.FC<OrderBagModalProps> = ({
       setCreatedOrder(res.order);
       setStep('success');
       onClearCart();
+      if (res.customer && onCustomerLogin) {
+        onCustomerLogin(res.customer);
+      }
     } else {
       alert(res.error || 'Failed to generate order slip. Please try again.');
     }
@@ -314,6 +372,117 @@ export const OrderBagModal: React.FC<OrderBagModalProps> = ({
               </button>
             </div>
 
+            {/* Guest vs Member Checkout Mode Switcher */}
+            <div className="bg-white border-2 border-black p-2 space-y-2">
+              <div className="flex border border-black bg-neutral-100">
+                <button
+                  type="button"
+                  onClick={() => setCheckoutMode('guest')}
+                  className={`flex-1 py-1.5 px-2 text-center font-bold text-[10px] sm:text-[11px] uppercase transition-all ${
+                    checkoutMode === 'guest'
+                      ? 'bg-black text-yellow-300 shadow-inner'
+                      : 'bg-white text-neutral-600 hover:text-black'
+                  }`}
+                >
+                  ⚡ GUEST CHECKOUT (NO ACCOUNT)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCheckoutMode('member')}
+                  className={`flex-1 py-1.5 px-2 text-center font-bold text-[10px] sm:text-[11px] uppercase transition-all ${
+                    checkoutMode === 'member'
+                      ? 'bg-black text-yellow-300 shadow-inner'
+                      : 'bg-white text-neutral-600 hover:text-black'
+                  }`}
+                >
+                  👤 MEMBER ACCOUNT {currentCustomer ? `(LOGGED IN: ${currentCustomer.name.split(' ')[0]})` : ''}
+                </button>
+              </div>
+
+              {checkoutMode === 'guest' ? (
+                <div className="p-1.5 bg-yellow-50 border border-yellow-200 text-[10px] text-neutral-700 flex items-center justify-between">
+                  <span>✓ <strong>Instant Guest Purchase:</strong> No registration required. Enter delivery address below.</span>
+                </div>
+              ) : currentCustomer ? (
+                <div className="p-2 bg-neutral-900 text-neutral-100 border border-black text-[10px] space-y-1">
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-white uppercase">
+                      ✓ MEMBER: {currentCustomer.name} ({currentCustomer.email})
+                    </span>
+                    <span className="bg-yellow-300 text-black font-bold px-1.5 py-0.2 text-[9px]">
+                      {currentCustomer.tier.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                  <div className="text-neutral-400 text-[9px] flex justify-between items-center">
+                    <span>Shipping address auto-populated from your archive profile.</span>
+                    {onOpenCustomerAccount && (
+                      <button
+                        type="button"
+                        onClick={onOpenCustomerAccount}
+                        className="text-yellow-300 hover:underline font-bold"
+                      >
+                        [EDIT SAVED PROFILE]
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                /* Inline sign in for member */
+                <div className="p-2 bg-neutral-900 text-white border border-black space-y-2 text-[10px]">
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-yellow-300 uppercase">MEMBER SIGN IN</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setInlineLoginEmail('callum.davies@hackneyskate.co.uk');
+                        setInlineLoginPass('archive26');
+                      }}
+                      className="text-[9px] text-emerald-400 underline font-mono cursor-pointer"
+                    >
+                      [Auto-fill Demo VIP Patron]
+                    </button>
+                  </div>
+                  {inlineLoginError && (
+                    <div className="text-red-400 text-[9px]">⚠️ {inlineLoginError}</div>
+                  )}
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <input
+                      type="email"
+                      placeholder="Account Email"
+                      value={inlineLoginEmail}
+                      onChange={(e) => setInlineLoginEmail(e.target.value)}
+                      className="bg-black border border-neutral-700 p-1 text-[10px] text-white outline-none"
+                    />
+                    <input
+                      type="password"
+                      placeholder="Password (archive26)"
+                      value={inlineLoginPass}
+                      onChange={(e) => setInlineLoginPass(e.target.value)}
+                      className="bg-black border border-neutral-700 p-1 text-[10px] text-white outline-none"
+                    />
+                  </div>
+                  <div className="flex justify-between items-center pt-1">
+                    <button
+                      type="button"
+                      onClick={handleInlineLogin}
+                      className="bg-white text-black font-bold px-2 py-1 text-[10px] uppercase hover:bg-neutral-200"
+                    >
+                      LOG IN AS MEMBER
+                    </button>
+                    {onOpenCustomerAccount && (
+                      <button
+                        type="button"
+                        onClick={onOpenCustomerAccount}
+                        className="text-neutral-400 hover:text-white underline text-[9px]"
+                      >
+                        Open Full Account Hub →
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="grid grid-cols-2 gap-2">
               <div className="col-span-2 sm:col-span-1">
                 <label className="block text-neutral-600 text-[10px] mb-0.5 font-bold">FULL NAME</label>
@@ -412,6 +581,36 @@ export const OrderBagModal: React.FC<OrderBagModalProps> = ({
                 {shippingFee === 0 ? 'FREE' : formatMoney(shippingFee, currency)}
               </span>
             </div>
+
+            {/* Optional Account Creation for Guest */}
+            {checkoutMode === 'guest' && (
+              <div className="bg-white border border-black p-2 space-y-1.5">
+                <label className="flex items-center space-x-2 text-[10px] font-bold text-black cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={createAccountOnGuest}
+                    onChange={(e) => setCreateAccountOnGuest(e.target.checked)}
+                    className="w-3.5 h-3.5 accent-black cursor-pointer"
+                  />
+                  <span>SAVE DETAILS & CREATE ARCHIVE MEMBER ACCOUNT WITH THIS ORDER</span>
+                </label>
+                {createAccountOnGuest && (
+                  <div className="pt-1.5 border-t border-dashed border-neutral-300 space-y-1">
+                    <label className="block text-[9px] text-neutral-600 font-bold">CHOOSE ACCOUNT PASSWORD</label>
+                    <input
+                      type="password"
+                      placeholder="Enter password (e.g. archive26)"
+                      value={guestPassword}
+                      onChange={(e) => setGuestPassword(e.target.value)}
+                      className="w-full bg-[#fbf9f3] border border-black p-1 text-xs outline-none font-typewriter"
+                    />
+                    <p className="text-[9px] text-neutral-500">
+                      ✓ An account will be established for {customer.email || 'your email'} to access lifetime tracking slips and VIP drop tiers.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Payment Method Selector */}
             <div className="pt-2 border-t border-dashed border-neutral-400">
@@ -523,6 +722,12 @@ export const OrderBagModal: React.FC<OrderBagModalProps> = ({
                 <span className="text-neutral-500 text-[10px]">CARRIER:</span>
                 <span className="bg-yellow-100 text-black border border-black px-1.5 text-[9px] font-bold uppercase">
                   {createdOrder.carrier || 'Royal Mail Tracked 24'}
+                </span>
+              </div>
+              <div className="flex justify-between border-t border-dashed border-neutral-300 pt-1 text-[10px]">
+                <span className="text-neutral-500">ACCOUNT TYPE:</span>
+                <span className="font-bold uppercase text-neutral-800">
+                  {checkoutMode === 'guest' && !createAccountOnGuest ? '⚡ Guest Purchase' : '👤 Archive Member'}
                 </span>
               </div>
             </div>
